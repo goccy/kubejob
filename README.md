@@ -10,7 +10,7 @@ $ go get github.com/goccy/kubejob/cmd/kubejob
 
 # How to use kubejob CLI
 
-```bash
+```
 Usage:
   kubejob [OPTIONS]
 
@@ -38,13 +38,10 @@ Help Options:
   -h, --help        Show this help message
 ```
 
+## Example
+
 ```bash
 $ kubejob --image golang:1.14.4 -- go version
-```
-
-output result is the following.
-
-```bash
 go version go1.14.4 linux/amd64
 ```
 
@@ -63,6 +60,6 @@ func main() {
       SetImage("golang:1.14.4").
       SetCommand([]string{"go", "version"}).
       Build()
-  job.Run(context.Background())
+  job.Run(context.Background()) // start job and waiting for
 }
 ```
