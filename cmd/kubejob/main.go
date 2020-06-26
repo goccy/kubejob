@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/goccy/kubejob"
 	"k8s.io/client-go/kubernetes"
@@ -33,28 +32,13 @@ func runJob(namespace string) error {
 	if err != nil {
 		return err
 	}
-
-	yml := `
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: goversion-job
-spec:
-  backoffLimit: 0
-  template:
-    metadata:
-      name: goversion-pod
-      labels:
-        test: hoge
-    spec:
-      restartPolicy: Never
-      containers:
-      - name: go-version
-        image: golang:1.14.4
-        command: ["go", "version"]
-`
-	job := kubejob.NewJobBuilder(clientset, namespace).BuildWithReader(strings.NewReader(yml))
-
+	job, err := kubejob.NewJobBuilder(clientset, namespace).
+		SetImage("golang:1.14.4").
+		SetCommand([]string{"go", "version"}).
+		Build()
+	if err != nil {
+		log.Fatalf("%+v", err)
+	}
 	if err := job.Run(context.Background()); err != nil {
 		log.Fatalf("%+v", err)
 	}

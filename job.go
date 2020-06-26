@@ -24,26 +24,71 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+const (
+	containerDummyName = "kubejob-container"
+	jobDummyLabel      = "kubejob-dummy-label"
+)
+
 type JobBuilder struct {
-	clientset *kubernetes.Clientset
-	namespace string
+	clientset     *kubernetes.Clientset
+	namespace     string
+	image         string
+	containerName string
+	command       []string
 }
 
 func NewJobBuilder(clientset *kubernetes.Clientset, namespace string) *JobBuilder {
 	return &JobBuilder{
-		clientset: clientset,
-		namespace: namespace,
+		clientset:     clientset,
+		namespace:     namespace,
+		containerName: containerDummyName,
 	}
 }
 
+func (b *JobBuilder) SetImage(image string) *JobBuilder {
+	b.image = image
+	return b
+}
+
+func (b *JobBuilder) SetCommand(cmd []string) *JobBuilder {
+	b.command = cmd
+	return b
+}
+
+func (b *JobBuilder) SetContainerName(container string) *JobBuilder {
+	b.containerName = container
+	return b
+}
+
 func (b *JobBuilder) Build() (*Job, error) {
-	return b.BuildWithJob(nil)
+	if b.image == "" {
+		return nil, xerrors.Errorf("could not find container.image name")
+	}
+	return b.BuildWithJob(&batch.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "kubejob",
+		},
+		Spec: batch.JobSpec{
+			Template: core.PodTemplateSpec{
+				Spec: core.PodSpec{
+					Containers: []core.Container{
+						{
+							Name:    b.containerName,
+							Image:   b.image,
+							Command: b.command,
+						},
+					},
+					RestartPolicy: core.RestartPolicyNever,
+				},
+			},
+		},
+	})
 }
 
 func (b *JobBuilder) BuildWithReader(r io.Reader) (*Job, error) {
 	var jobSpec batch.Job
 	if err := yaml.NewYAMLOrJSONDecoder(r, 1024).Decode(&jobSpec); err != nil {
-		return xerrors.Errorf("failed to decode YAML: %w", err)
+		return nil, xerrors.Errorf("failed to decode YAML: %w", err)
 	}
 	return b.BuildWithJob(&jobSpec)
 }
@@ -52,12 +97,22 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 	jobClient := b.clientset.BatchV1().Jobs(b.namespace)
 	podClient := b.clientset.CoreV1().Pods(b.namespace)
 	restClient := b.clientset.CoreV1().RESTClient()
+	for idx := range jobSpec.Spec.Template.Spec.Containers {
+		if jobSpec.Spec.Template.Spec.Containers[idx].Name == "" {
+			jobSpec.Spec.Template.Spec.Containers[idx].Name = b.containerName
+		}
+	}
+	if len(jobSpec.Spec.Template.Labels) == 0 {
+		jobSpec.Spec.Template.Labels = map[string]string{
+			jobDummyLabel: jobDummyLabel,
+		}
+	}
 	return &Job{
 		jobClient:  jobClient,
 		podClient:  podClient,
 		restClient: restClient,
 		jobSpec:    jobSpec,
-	}
+	}, nil
 }
 
 type Job struct {
@@ -80,8 +135,7 @@ func (j *Job) SetWriter(w io.Writer) {
 }
 
 func (j *Job) Run(ctx context.Context) (e error) {
-	job, err := j.jobClient.Create(j.jobSpec)
-	if err != nil {
+	if _, err := j.jobClient.Create(j.jobSpec); err != nil {
 		return xerrors.Errorf("failed to create job: %w", err)
 	}
 	defer func() {
@@ -97,7 +151,7 @@ func (j *Job) Run(ctx context.Context) (e error) {
 			if w == nil {
 				w = os.Stdout
 			}
-			fmt.Fprintf(w, "[%s][%s]:%s", job.Name, podLog.container, podLog.log)
+			fmt.Fprintf(w, "%s", podLog.log)
 		}
 	}()
 
