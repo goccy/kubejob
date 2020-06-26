@@ -41,5 +41,4 @@ go version go1.14.4 linux/amd64
       SetCommand([]string{"go", "version"}).
       Build()
   job.Run(context.Background()) // start job and waiting for
-}
 ```
