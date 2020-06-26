@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -89,9 +89,9 @@ func main() {
 	parser := flags.NewParser(&opt, flags.Default)
 	args, err := parser.Parse()
 	if err != nil {
-		log.Fatalf("%+v", err)
+		return
 	}
 	if err := _main(args, opt); err != nil {
-		log.Fatalf("%+v", err)
+		fmt.Println(err)
 	}
 }
