@@ -100,6 +100,10 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 	if jobSpec.ObjectMeta.Name == "" {
 		jobSpec.ObjectMeta.Name = "kubejob"
 	}
+	if jobSpec.Spec.Template.ObjectMeta.Name == "" &&
+		jobSpec.Spec.Template.ObjectMeta.GenerateName == "" {
+		jobSpec.Spec.Template.ObjectMeta.GenerateName = "kubejob-"
+	}
 	if jobSpec.Spec.Template.Spec.RestartPolicy == "" {
 		jobSpec.Spec.Template.Spec.RestartPolicy = core.RestartPolicyNever
 	}
