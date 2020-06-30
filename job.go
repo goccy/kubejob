@@ -97,6 +97,12 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 	jobClient := b.clientset.BatchV1().Jobs(b.namespace)
 	podClient := b.clientset.CoreV1().Pods(b.namespace)
 	restClient := b.clientset.CoreV1().RESTClient()
+	if jobSpec.ObjectMeta.Name == "" {
+		jobSpec.ObjectMeta.Name = "kubejob"
+	}
+	if jobSpec.Spec.Template.Spec.RestartPolicy == "" {
+		jobSpec.Spec.Template.Spec.RestartPolicy = core.RestartPolicyNever
+	}
 	for idx := range jobSpec.Spec.Template.Spec.Containers {
 		if jobSpec.Spec.Template.Spec.Containers[idx].Name == "" {
 			jobSpec.Spec.Template.Spec.Containers[idx].Name = b.containerName
@@ -250,10 +256,28 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 	return nil
 }
 
+func (j *Job) commandLog(pod *core.Pod, container core.Container) *podLog {
+	cmd := []string{}
+	cmd = append(cmd, container.Command...)
+	cmd = append(cmd, container.Args...)
+	return &podLog{
+		pod:       pod,
+		container: container.Name,
+		log:       fmt.Sprintf("%s\n", strings.Join(cmd, " ")),
+	}
+}
+
 func (j *Job) logStreamPod(ctx context.Context, pod *core.Pod) error {
 	var eg errgroup.Group
+	for _, container := range pod.Spec.InitContainers {
+		j.podLogs <- j.commandLog(pod, container)
+		if err := j.logStreamContainer(ctx, pod, container.Name); err != nil {
+			return xerrors.Errorf("failed to log stream container: %w", err)
+		}
+	}
 	for _, container := range pod.Spec.Containers {
 		container := container
+		j.podLogs <- j.commandLog(pod, container)
 		eg.Go(func() error {
 			if err := j.logStreamContainer(ctx, pod, container.Name); err != nil {
 				return xerrors.Errorf("failed to log stream container: %w", err)
