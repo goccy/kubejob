@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/rs/xid"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/xerrors"
 	batch "k8s.io/api/batch/v1"
@@ -24,25 +25,82 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-const (
-	containerDummyName = "kubejob-container"
-	jobDummyLabel      = "kubejob-dummy-label"
-)
+type FailedJob struct {
+	Pod *core.Pod
+}
+
+func (j *FailedJob) errorContainerNamesFromStatuses(containerStatuses []core.ContainerStatus) []string {
+	containerNames := []string{}
+	for _, status := range containerStatuses {
+		terminated := status.State.Terminated
+		if terminated == nil {
+			continue
+		}
+		if terminated.Reason == "Error" {
+			containerNames = append(containerNames, status.Name)
+		}
+	}
+	return containerNames
+}
+
+func (j *FailedJob) FailedContainerNames() []string {
+	containerNames := []string{}
+	containerNames = append(containerNames,
+		j.errorContainerNamesFromStatuses(j.Pod.Status.InitContainerStatuses)...,
+	)
+	containerNames = append(containerNames,
+		j.errorContainerNamesFromStatuses(j.Pod.Status.ContainerStatuses)...,
+	)
+	return containerNames
+}
+
+func (j *FailedJob) FailedContainers() []core.Container {
+	nameToContainerMap := map[string]core.Container{}
+	for _, container := range j.Pod.Spec.InitContainers {
+		nameToContainerMap[container.Name] = container
+	}
+	for _, container := range j.Pod.Spec.Containers {
+		nameToContainerMap[container.Name] = container
+	}
+	containers := []core.Container{}
+	for _, name := range j.FailedContainerNames() {
+		containers = append(containers, nameToContainerMap[name])
+	}
+	return containers
+}
+
+func (j *FailedJob) Error() string {
+	return "failed to job"
+}
 
 type JobBuilder struct {
-	clientset     *kubernetes.Clientset
-	namespace     string
-	image         string
-	containerName string
-	command       []string
+	clientset *kubernetes.Clientset
+	namespace string
+	image     string
+	command   []string
 }
 
 func NewJobBuilder(clientset *kubernetes.Clientset, namespace string) *JobBuilder {
 	return &JobBuilder{
-		clientset:     clientset,
-		namespace:     namespace,
-		containerName: containerDummyName,
+		clientset: clientset,
+		namespace: namespace,
 	}
+}
+
+func (b *JobBuilder) jobName() string {
+	return b.generateName("kubejob")
+}
+
+func (b *JobBuilder) containerName() string {
+	return b.generateName("kubejob-container")
+}
+
+func (b *JobBuilder) labelName() string {
+	return b.generateName("kubejob-label")
+}
+
+func (b *JobBuilder) generateName(name string) string {
+	return fmt.Sprintf("%s-%s", name, xid.New())
 }
 
 func (b *JobBuilder) SetImage(image string) *JobBuilder {
@@ -55,25 +113,20 @@ func (b *JobBuilder) SetCommand(cmd []string) *JobBuilder {
 	return b
 }
 
-func (b *JobBuilder) SetContainerName(container string) *JobBuilder {
-	b.containerName = container
-	return b
-}
-
 func (b *JobBuilder) Build() (*Job, error) {
 	if b.image == "" {
 		return nil, xerrors.Errorf("could not find container.image name")
 	}
 	return b.BuildWithJob(&batch.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "kubejob",
+			Name: b.jobName(),
 		},
 		Spec: batch.JobSpec{
 			Template: core.PodTemplateSpec{
 				Spec: core.PodSpec{
 					Containers: []core.Container{
 						{
-							Name:    b.containerName,
+							Name:    b.containerName(),
 							Image:   b.image,
 							Command: b.command,
 						},
@@ -98,25 +151,21 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 	podClient := b.clientset.CoreV1().Pods(b.namespace)
 	restClient := b.clientset.CoreV1().RESTClient()
 	if jobSpec.ObjectMeta.Name == "" {
-		jobSpec.ObjectMeta.Name = "kubejob"
-	}
-	if jobSpec.Spec.Template.ObjectMeta.Name == "" &&
-		jobSpec.Spec.Template.ObjectMeta.GenerateName == "" {
-		jobSpec.Spec.Template.ObjectMeta.GenerateName = "kubejob-"
+		jobSpec.ObjectMeta.Name = b.jobName()
 	}
 	if jobSpec.Spec.Template.Spec.RestartPolicy == "" {
 		jobSpec.Spec.Template.Spec.RestartPolicy = core.RestartPolicyNever
 	}
 	for idx := range jobSpec.Spec.Template.Spec.Containers {
 		if jobSpec.Spec.Template.Spec.Containers[idx].Name == "" {
-			jobSpec.Spec.Template.Spec.Containers[idx].Name = b.containerName
+			jobSpec.Spec.Template.Spec.Containers[idx].Name = b.containerName()
 		}
 	}
-	if len(jobSpec.Spec.Template.Labels) == 0 {
-		jobSpec.Spec.Template.Labels = map[string]string{
-			jobDummyLabel: jobDummyLabel,
-		}
+	labelName := b.labelName()
+	if jobSpec.Spec.Template.Labels == nil {
+		jobSpec.Spec.Template.Labels = map[string]string{}
 	}
+	jobSpec.Spec.Template.Labels[labelName] = labelName
 	return &Job{
 		jobClient:  jobClient,
 		podClient:  podClient,
@@ -126,22 +175,45 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 }
 
 type Job struct {
-	jobClient  batchv1.JobInterface
-	podClient  v1.PodInterface
-	restClient rest.Interface
-	jobSpec    *batch.Job
-	podLogs    chan *podLog
-	w          io.Writer
+	jobClient                batchv1.JobInterface
+	podClient                v1.PodInterface
+	restClient               rest.Interface
+	jobSpec                  *batch.Job
+	containerLogs            chan *ContainerLog
+	logger                   Logger
+	disabledInitContainerLog bool
+	disabledInitCommandLog   bool
+	disabledContainerLog     bool
+	disabledCommandLog       bool
 }
 
-type podLog struct {
-	pod       *core.Pod
-	container string
-	log       string
+type Logger func(*ContainerLog)
+
+type ContainerLog struct {
+	Pod        *core.Pod
+	Container  core.Container
+	Log        string
+	IsFinished bool
 }
 
-func (j *Job) SetWriter(w io.Writer) {
-	j.w = w
+func (j *Job) SetLogger(logger Logger) {
+	j.logger = logger
+}
+
+func (j *Job) DisableInitContainerLog() {
+	j.disabledInitContainerLog = true
+}
+
+func (j *Job) DisableInitCommandLog() {
+	j.disabledInitCommandLog = true
+}
+
+func (j *Job) DisableContainerLog() {
+	j.disabledContainerLog = true
+}
+
+func (j *Job) DisableCommandLog() {
+	j.disabledCommandLog = true
 }
 
 func (j *Job) Run(ctx context.Context) (e error) {
@@ -152,22 +224,42 @@ func (j *Job) Run(ctx context.Context) (e error) {
 		if err := j.jobClient.Delete(j.jobSpec.Name, nil); err != nil {
 			e = xerrors.Errorf("failed to delete job: %w", err)
 		}
+		podList, _ := j.podClient.List(metav1.ListOptions{
+			LabelSelector: j.labelSelector(),
+		})
+		if podList == nil {
+			return
+		}
+		if len(podList.Items) == 0 {
+			return
+		}
+		for _, pod := range podList.Items {
+			if err := j.podClient.Delete(pod.Name, &metav1.DeleteOptions{}); err != nil {
+				err = xerrors.Errorf("failed to delete pod: %w", err)
+				if e == nil {
+					e = err
+				} else {
+					e = xerrors.Errorf(strings.Join([]string{e.Error(), err.Error()}, "\n"))
+				}
+			}
+		}
 	}()
 
-	j.podLogs = make(chan *podLog)
+	j.containerLogs = make(chan *ContainerLog)
 	go func() {
-		for podLog := range j.podLogs {
-			w := j.w
-			if w == nil {
-				w = os.Stdout
+		for containerLog := range j.containerLogs {
+			if j.logger != nil {
+				j.logger(containerLog)
+			} else if !containerLog.IsFinished {
+				fmt.Fprintf(os.Stderr, "%s", containerLog.Log)
 			}
-			fmt.Fprintf(w, "%s", podLog.log)
 		}
 	}()
 
 	if err := j.wait(ctx); err != nil {
 		return xerrors.Errorf("failed to wait: %w", err)
 	}
+
 	return nil
 }
 
@@ -236,54 +328,77 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 						return nil
 					})
 				})
+				if pod.Status.Phase == core.PodFailed {
+					return &FailedJob{Pod: pod}
+				}
 				return nil
 			}
 			phase = pod.Status.Phase
 		}
 		return nil
 	})
-
-	defer func() {
-		if err := j.podClient.Delete(pod.Name, &metav1.DeleteOptions{}); err != nil {
-			err = xerrors.Errorf("failed to delete pod: %w", err)
-			if e == nil {
-				e = err
-			} else {
-				e = xerrors.Errorf(strings.Join([]string{e.Error(), err.Error()}, "\n"))
-			}
-		}
-	}()
-
 	if err := eg.Wait(); err != nil {
 		return xerrors.Errorf("failed to wait in watchLoop: %w", err)
 	}
 	return nil
 }
 
-func (j *Job) commandLog(pod *core.Pod, container core.Container) *podLog {
+func (j *Job) enabledInitCommandLog() bool {
+	if j.disabledInitContainerLog {
+		return false
+	}
+	if j.disabledInitCommandLog {
+		return false
+	}
+	return true
+}
+
+func (j *Job) enabledCommandLog() bool {
+	if j.disabledContainerLog {
+		return false
+	}
+	if j.disabledCommandLog {
+		return false
+	}
+	return true
+}
+
+func (j *Job) commandLog(pod *core.Pod, container core.Container) *ContainerLog {
 	cmd := []string{}
 	cmd = append(cmd, container.Command...)
 	cmd = append(cmd, container.Args...)
-	return &podLog{
-		pod:       pod,
-		container: container.Name,
-		log:       fmt.Sprintf("%s\n", strings.Join(cmd, " ")),
+	return &ContainerLog{
+		Pod:       pod,
+		Container: container,
+		Log:       fmt.Sprintf("%s\n", strings.Join(cmd, " ")),
 	}
 }
 
 func (j *Job) logStreamPod(ctx context.Context, pod *core.Pod) error {
 	var eg errgroup.Group
 	for _, container := range pod.Spec.InitContainers {
-		j.podLogs <- j.commandLog(pod, container)
-		if err := j.logStreamContainer(ctx, pod, container.Name); err != nil {
+		enabledLog := !j.disabledInitContainerLog
+		if err := j.logStreamContainer(
+			ctx,
+			pod,
+			container,
+			j.enabledInitCommandLog(),
+			enabledLog,
+		); err != nil {
 			return xerrors.Errorf("failed to log stream container: %w", err)
 		}
 	}
 	for _, container := range pod.Spec.Containers {
 		container := container
-		j.podLogs <- j.commandLog(pod, container)
 		eg.Go(func() error {
-			if err := j.logStreamContainer(ctx, pod, container.Name); err != nil {
+			enabledLog := !j.disabledContainerLog
+			if err := j.logStreamContainer(
+				ctx,
+				pod,
+				container,
+				j.enabledCommandLog(),
+				enabledLog,
+			); err != nil {
 				return xerrors.Errorf("failed to log stream container: %w", err)
 			}
 			return nil
@@ -295,7 +410,7 @@ func (j *Job) logStreamPod(ctx context.Context, pod *core.Pod) error {
 	return nil
 }
 
-func (j *Job) logStreamContainer(ctx context.Context, pod *core.Pod, container string) error {
+func (j *Job) logStreamContainer(ctx context.Context, pod *core.Pod, container core.Container, enabledCommandLog, enabledLog bool) error {
 	stream, err := j.restClient.Get().
 		Namespace(pod.Namespace).
 		Resource("pods").
@@ -303,12 +418,16 @@ func (j *Job) logStreamContainer(ctx context.Context, pod *core.Pod, container s
 		SubResource("log").
 		VersionedParams(&core.PodLogOptions{
 			Follow:    true,
-			Container: container,
+			Container: container.Name,
 		}, scheme.ParameterCodec).Stream()
 	if err != nil {
 		return xerrors.Errorf("failed to create log stream: %w", err)
 	}
 	defer stream.Close()
+
+	if enabledCommandLog {
+		j.containerLogs <- j.commandLog(pod, container)
+	}
 
 	errchan := make(chan error, 1)
 
@@ -320,13 +439,21 @@ func (j *Job) logStreamContainer(ctx context.Context, pod *core.Pod, container s
 				errchan <- err
 			}
 			if err == nil {
-				j.podLogs <- &podLog{
-					pod:       pod,
-					container: container,
-					log:       line,
+				if enabledLog {
+					j.containerLogs <- &ContainerLog{
+						Pod:       pod,
+						Container: container,
+						Log:       line,
+					}
 				}
 			}
 			if err == io.EOF {
+				j.containerLogs <- &ContainerLog{
+					Pod:        pod,
+					Container:  container,
+					Log:        "",
+					IsFinished: true,
+				}
 				errchan <- nil
 			}
 		}
