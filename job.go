@@ -167,18 +167,18 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 	}
 	jobSpec.Spec.Template.Labels[labelName] = labelName
 	return &Job{
+		Job:        jobSpec,
 		jobClient:  jobClient,
 		podClient:  podClient,
 		restClient: restClient,
-		jobSpec:    jobSpec,
 	}, nil
 }
 
 type Job struct {
+	*batch.Job
 	jobClient                batchv1.JobInterface
 	podClient                v1.PodInterface
 	restClient               rest.Interface
-	jobSpec                  *batch.Job
 	containerLogs            chan *ContainerLog
 	logger                   Logger
 	disabledInitContainerLog bool
@@ -217,11 +217,11 @@ func (j *Job) DisableCommandLog() {
 }
 
 func (j *Job) Run(ctx context.Context) (e error) {
-	if _, err := j.jobClient.Create(j.jobSpec); err != nil {
+	if _, err := j.jobClient.Create(j.Job); err != nil {
 		return xerrors.Errorf("failed to create job: %w", err)
 	}
 	defer func() {
-		if err := j.jobClient.Delete(j.jobSpec.Name, nil); err != nil {
+		if err := j.jobClient.Delete(j.Name, nil); err != nil {
 			e = xerrors.Errorf("failed to delete job: %w", err)
 		}
 		podList, _ := j.podClient.List(metav1.ListOptions{
@@ -280,7 +280,7 @@ func (j *Job) wait(ctx context.Context) error {
 }
 
 func (j *Job) labelSelector() string {
-	labels := j.jobSpec.Spec.Template.Labels
+	labels := j.Spec.Template.Labels
 	keys := []string{}
 	for k := range labels {
 		keys = append(keys, k)
