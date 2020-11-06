@@ -23,6 +23,7 @@ import (
 	batchv1 "k8s.io/client-go/kubernetes/typed/batch/v1"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 type FailedJob struct {
@@ -74,15 +75,15 @@ func (j *FailedJob) Error() string {
 }
 
 type JobBuilder struct {
-	clientset *kubernetes.Clientset
+	config    *rest.Config
 	namespace string
 	image     string
 	command   []string
 }
 
-func NewJobBuilder(clientset *kubernetes.Clientset, namespace string) *JobBuilder {
+func NewJobBuilder(config *rest.Config, namespace string) *JobBuilder {
 	return &JobBuilder{
-		clientset: clientset,
+		config:    config,
 		namespace: namespace,
 	}
 }
@@ -147,9 +148,13 @@ func (b *JobBuilder) BuildWithReader(r io.Reader) (*Job, error) {
 }
 
 func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
-	jobClient := b.clientset.BatchV1().Jobs(b.namespace)
-	podClient := b.clientset.CoreV1().Pods(b.namespace)
-	restClient := b.clientset.CoreV1().RESTClient()
+	clientset, err := kubernetes.NewForConfig(b.config)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to create clientset: %w", err)
+	}
+	jobClient := clientset.BatchV1().Jobs(b.namespace)
+	podClient := clientset.CoreV1().Pods(b.namespace)
+	restClient := clientset.CoreV1().RESTClient()
 	if jobSpec.ObjectMeta.Name == "" {
 		jobSpec.ObjectMeta.Name = b.jobName()
 	}
@@ -171,6 +176,7 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 		jobClient:  jobClient,
 		podClient:  podClient,
 		restClient: restClient,
+		config:     b.config,
 	}, nil
 }
 
@@ -185,6 +191,8 @@ type Job struct {
 	disabledInitCommandLog   bool
 	disabledContainerLog     bool
 	disabledCommandLog       bool
+	config                   *rest.Config
+	podRunningCallback       func(*core.Pod) error
 }
 
 type Logger func(*ContainerLog)
@@ -214,6 +222,107 @@ func (j *Job) DisableContainerLog() {
 
 func (j *Job) DisableCommandLog() {
 	j.disabledCommandLog = true
+}
+
+type JobExecutor struct {
+	Container            core.Container
+	pod                  *core.Pod
+	command              []string
+	args                 []string
+	restClient           rest.Interface
+	config               *rest.Config
+	disabledContainerLog bool
+	disabledCommandLog   bool
+}
+
+func (e *JobExecutor) exec(cmd []string) error {
+	pod := e.pod
+	req := e.restClient.Post().
+		Namespace(pod.Namespace).
+		Resource("pods").
+		Name(pod.Name).
+		SubResource("exec").
+		VersionedParams(&core.PodExecOptions{
+			Container: e.Container.Name,
+			Command:   cmd,
+			Stdin:     false,
+			Stdout:    true,
+			Stderr:    true,
+		}, scheme.ParameterCodec)
+	url := req.URL()
+	exec, err := remotecommand.NewSPDYExecutor(e.config, "POST", url)
+	if err != nil {
+		return err
+	}
+	return exec.Stream(remotecommand.StreamOptions{
+		Stdin:  nil,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+		Tty:    false,
+	})
+}
+
+func (e *JobExecutor) Exec() error {
+	if !e.disabledCommandLog {
+		fmt.Println(strings.Join(append(e.command, e.args...), " "))
+	}
+	var status int
+	if err := e.exec(append(e.command, e.args...)); err != nil {
+		status = 1
+	}
+	if err := e.exec([]string{
+		"sh",
+		"-c",
+		fmt.Sprintf(`echo %d > /tmp/kubejob-status`, status),
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+type JobExecutionHandler func([]*JobExecutor) error
+
+const jobCommandTemplate = `
+while [ ! -f /tmp/kubejob-status ]
+do
+    sleep 1;
+done
+
+exit $(cat /tmp/kubejob-status)
+`
+
+func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler) error {
+	executors := []*JobExecutor{}
+	for idx := range j.Job.Spec.Template.Spec.Containers {
+		container := j.Job.Spec.Template.Spec.Containers[idx]
+		command := container.Command
+		args := container.Args
+		executors = append(executors, &JobExecutor{
+			Container:            container,
+			command:              command,
+			args:                 args,
+			restClient:           j.restClient,
+			config:               j.config,
+			disabledCommandLog:   j.disabledCommandLog,
+			disabledContainerLog: j.disabledContainerLog,
+		})
+		j.Job.Spec.Template.Spec.Containers[idx].Command = []string{"sh"}
+		j.Job.Spec.Template.Spec.Containers[idx].Args = []string{"-c", jobCommandTemplate}
+	}
+	j.DisableCommandLog()
+	j.podRunningCallback = func(pod *core.Pod) error {
+		for _, exec := range executors {
+			exec.pod = pod
+		}
+		if err := handler(executors); err != nil {
+			return xerrors.Errorf("failed to handle executors: %w", err)
+		}
+		return nil
+	}
+	if err := j.Run(ctx); err != nil {
+		return xerrors.Errorf("failed to run job: %w", err)
+	}
+	return nil
 }
 
 func (j *Job) Run(ctx context.Context) (e error) {
@@ -311,7 +420,11 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 			}
 			switch pod.Status.Phase {
 			case core.PodRunning:
+				var callbackErr error
 				once.Do(func() {
+					if j.podRunningCallback != nil {
+						callbackErr = j.podRunningCallback(pod)
+					}
 					eg.Go(func() error {
 						if err := j.logStreamPod(ctx, pod); err != nil {
 							return xerrors.Errorf("failed to log stream pod: %w", err)
@@ -319,6 +432,9 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 						return nil
 					})
 				})
+				if callbackErr != nil {
+					return xerrors.Errorf("failed to callback for pod running: %w", callbackErr)
+				}
 			case core.PodSucceeded, core.PodFailed:
 				once.Do(func() {
 					eg.Go(func() error {

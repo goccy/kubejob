@@ -26,6 +26,12 @@ rules:
   - apiGroups:
       - ""
     resources:
+      - pods/exec
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
       - secrets
     verbs:
       - get

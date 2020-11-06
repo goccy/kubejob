@@ -28,6 +28,9 @@ test-cluster: $(KIND)
 	fi ;\
 	}
 
+delete-cluster: $(KIND)
+	$(KIND) delete clusters $(CLUSTER_NAME)
+
 build-image:
 	docker build -t kubejob:latest .
 
