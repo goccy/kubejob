@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+	spdy "k8s.io/client-go/transport/spdy"
 )
 
 type FailedJob struct {
@@ -236,6 +238,8 @@ type JobExecutor struct {
 	config               *rest.Config
 	disabledContainerLog bool
 	disabledCommandLog   bool
+	transport            http.RoundTripper
+	upgrader             spdy.Upgrader
 }
 
 type buffer struct {
@@ -277,7 +281,7 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 		}, scheme.ParameterCodec)
 	url := req.URL()
 	start := time.Now()
-	exec, err := remotecommand.NewSPDYExecutor(e.config, "POST", url)
+	exec, err := remotecommand.NewSPDYExecutorForTransports(e.transport, e.upgrader, "POST", url)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to create spdy executor: %w", err)
 	}
@@ -331,6 +335,10 @@ exit $(cat /tmp/kubejob-status)
 
 func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler) error {
 	executors := []*JobExecutor{}
+	transport, upgrader, err := spdy.RoundTripperFor(j.config)
+	if err != nil {
+		return xerrors.Errorf("failed to RoundTripperFor: %w", err)
+	}
 	for idx := range j.Job.Spec.Template.Spec.Containers {
 		container := j.Job.Spec.Template.Spec.Containers[idx]
 		command := container.Command
@@ -343,6 +351,8 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 			config:               j.config,
 			disabledCommandLog:   j.disabledCommandLog,
 			disabledContainerLog: j.disabledContainerLog,
+			transport:            transport,
+			upgrader:             upgrader,
 		})
 		j.Job.Spec.Template.Spec.Containers[idx].Command = []string{"sh"}
 		j.Job.Spec.Template.Spec.Containers[idx].Args = []string{"-c", jobCommandTemplate}
