@@ -362,7 +362,10 @@ func (e *JobExecutor) stream(method string, url *url.URL, options remotecommand.
 		streamer = newStreamProtocolV1(options)
 	}
 
-	return streamer.stream(conn)
+	streamStart := time.Now()
+	streamErr := streamer.stream(conn)
+	fmt.Println("stream time = ", time.Since(streamStart).Seconds())
+	return streamErr
 }
 
 func (e *JobExecutor) Exec() ([]byte, error) {
