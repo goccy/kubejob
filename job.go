@@ -2,9 +2,11 @@ package kubejob
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"sort"
 	"strings"
@@ -235,7 +237,24 @@ type JobExecutor struct {
 	disabledCommandLog   bool
 }
 
-func (e *JobExecutor) exec(cmd []string) error {
+type buffer struct {
+	buf bytes.Buffer
+	mu  sync.Mutex
+}
+
+func (b *buffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *buffer) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Bytes()
+}
+
+func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 	pod := e.pod
 	req := e.restClient.Post().
 		Namespace(pod.Namespace).
@@ -252,32 +271,41 @@ func (e *JobExecutor) exec(cmd []string) error {
 	url := req.URL()
 	exec, err := remotecommand.NewSPDYExecutor(e.config, "POST", url)
 	if err != nil {
-		return err
+		return nil, xerrors.Errorf("failed to create spdy executor: %w", err)
 	}
-	return exec.Stream(remotecommand.StreamOptions{
+	buf := &buffer{}
+	if err := exec.Stream(remotecommand.StreamOptions{
 		Stdin:  nil,
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
+		Stdout: buf,
+		Stderr: buf,
 		Tty:    false,
-	})
+	}); err != nil {
+		return buf.Bytes(), xerrors.Errorf("faield to exec command: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
-func (e *JobExecutor) Exec() error {
+func (e *JobExecutor) Exec() ([]byte, error) {
 	if !e.disabledCommandLog {
 		fmt.Println(strings.Join(append(e.command, e.args...), " "))
 	}
-	var status int
-	if err := e.exec(append(e.command, e.args...)); err != nil {
+	var (
+		status  int
+		errTest error
+	)
+	out, err := e.exec(append(e.command, e.args...))
+	if err != nil {
 		status = 1
+		errTest = &FailedJob{Pod: e.pod}
 	}
-	if err := e.exec([]string{
+	if _, err := e.exec([]string{
 		"sh",
 		"-c",
 		fmt.Sprintf(`echo %d > /tmp/kubejob-status`, status),
 	}); err != nil {
-		return err
+		log.Print("failed to send test status")
 	}
-	return nil
+	return out, errTest
 }
 
 type JobExecutionHandler func([]*JobExecutor) error

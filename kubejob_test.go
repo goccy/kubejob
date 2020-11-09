@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/goccy/kubejob"
+	"golang.org/x/xerrors"
 	batchv1 "k8s.io/api/batch/v1"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
@@ -47,30 +48,82 @@ func Test_Run(t *testing.T) {
 }
 
 func Test_RunnerWithExecutionHandler(t *testing.T) {
-	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
-		Spec: batchv1.JobSpec{
-			Template: apiv1.PodTemplateSpec{
-				Spec: apiv1.PodSpec{
-					Containers: []apiv1.Container{
-						{
-							Name:    "test",
-							Image:   "golang:1.15",
-							Command: []string{"echo", "foo"},
+	t.Run("success", func(t *testing.T) {
+		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			Spec: batchv1.JobSpec{
+				Template: apiv1.PodTemplateSpec{
+					Spec: apiv1.PodSpec{
+						Containers: []apiv1.Container{
+							{
+								Name:    "test",
+								Image:   "golang:1.15",
+								Command: []string{"echo", "foo"},
+							},
 						},
 					},
 				},
 			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("failed to build job: %+v", err)
-	}
-	if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
-		for _, exec := range executors {
-			exec.Exec()
+		})
+		if err != nil {
+			t.Fatalf("failed to build job: %+v", err)
 		}
-		return nil
-	}); err != nil {
-		t.Fatalf("failed to run: %+v", err)
-	}
+		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+			for _, exec := range executors {
+				out, err := exec.Exec()
+				if err != nil {
+					t.Fatalf("%+v", err)
+				}
+				if string(out) != "foo\n" {
+					t.Fatalf("cannot get output %q", string(out))
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("failed to run: %+v", err)
+		}
+	})
+	t.Run("failure", func(t *testing.T) {
+		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			Spec: batchv1.JobSpec{
+				Template: apiv1.PodTemplateSpec{
+					Spec: apiv1.PodSpec{
+						Containers: []apiv1.Container{
+							{
+								Name:    "test",
+								Image:   "golang:1.15",
+								Command: []string{"cat", "fuga"},
+							},
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to build job: %+v", err)
+		}
+		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+			for _, exec := range executors {
+				out, err := exec.Exec()
+				if err == nil {
+					t.Fatal("expect error")
+				}
+				var failedJob *kubejob.FailedJob
+				if xerrors.As(err, &failedJob) {
+					for _, container := range failedJob.FailedContainers() {
+						if container.Name != "test" {
+							t.Fatalf("cannot get valid container: %s", container.Name)
+						}
+					}
+				} else {
+					t.Fatal("cannot get FailedJob")
+				}
+				if string(out) != "cat: fuga: No such file or directory\n" {
+					t.Fatalf("cannot get output %q", string(out))
+				}
+			}
+			return nil
+		}); err == nil {
+			t.Fatal("expect error")
+		}
+	})
 }
