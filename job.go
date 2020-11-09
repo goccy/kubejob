@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/xid"
 	"golang.org/x/sync/errgroup"
@@ -293,14 +294,18 @@ func (e *JobExecutor) Exec() ([]byte, error) {
 		status  int
 		errTest error
 	)
+	start := time.Now()
 	out, err := e.exec(append(e.command, e.args...))
+	fmt.Println("command time = ", time.Since(start).Seconds())
 	if err != nil {
 		status = 1
 		errTest = &FailedJob{Pod: e.pod}
 	}
+	start = time.Now()
 	if _, err := e.exec([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
 		log.Print("failed to send test status: ", err)
 	}
+	fmt.Println("send test status time = ", time.Since(start).Seconds())
 	return out, errTest
 }
 
