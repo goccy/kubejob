@@ -239,8 +239,14 @@ type JobExecutor struct {
 }
 
 type buffer struct {
-	buf bytes.Buffer
+	buf *bytes.Buffer
 	mu  sync.Mutex
+}
+
+func newBuffer() *buffer {
+	return &buffer{
+		buf: bytes.NewBuffer(make([]byte, 0, 1024)),
+	}
 }
 
 func (b *buffer) Write(p []byte) (int, error) {
@@ -274,7 +280,7 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 	if err != nil {
 		return nil, xerrors.Errorf("failed to create spdy executor: %w", err)
 	}
-	buf := &buffer{}
+	buf := newBuffer()
 	if err := exec.Stream(remotecommand.StreamOptions{
 		Stdin:  nil,
 		Stdout: buf,
