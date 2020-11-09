@@ -281,14 +281,17 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 		return nil, xerrors.Errorf("failed to create spdy executor: %w", err)
 	}
 	buf := newBuffer()
+	start := time.Now()
 	if err := exec.Stream(remotecommand.StreamOptions{
 		Stdin:  nil,
 		Stdout: buf,
 		Stderr: buf,
 		Tty:    false,
 	}); err != nil {
+		fmt.Println("exec time = ", time.Since(start).Seconds())
 		return buf.Bytes(), xerrors.Errorf("faield to exec command: %w", err)
 	}
+	fmt.Println("exec time = ", time.Since(start).Seconds())
 	return buf.Bytes(), nil
 }
 
