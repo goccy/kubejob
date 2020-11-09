@@ -57,7 +57,13 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 							{
 								Name:    "test",
 								Image:   "golang:1.15",
-								Command: []string{"echo", "foo"},
+								Command: []string{"echo", "$TEST"},
+								Env: []apiv1.EnvVar{
+									{
+										Name:  "TEST",
+										Value: "kubejob",
+									},
+								},
 							},
 						},
 					},
@@ -71,9 +77,9 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 			for _, exec := range executors {
 				out, err := exec.Exec()
 				if err != nil {
-					t.Fatalf("%+v", err)
+					t.Fatalf("%s: %+v", string(out), err)
 				}
-				if string(out) != "foo\n" {
+				if string(out) != "kubejob\n" {
 					t.Fatalf("cannot get output %q", string(out))
 				}
 			}

@@ -263,7 +263,7 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 		SubResource("exec").
 		VersionedParams(&core.PodExecOptions{
 			Container: e.Container.Name,
-			Command:   cmd,
+			Command:   []string{"sh", "-c", strings.Join(cmd, " ")},
 			Stdin:     false,
 			Stdout:    true,
 			Stderr:    true,
@@ -298,12 +298,8 @@ func (e *JobExecutor) Exec() ([]byte, error) {
 		status = 1
 		errTest = &FailedJob{Pod: e.pod}
 	}
-	if _, err := e.exec([]string{
-		"sh",
-		"-c",
-		fmt.Sprintf(`echo %d > /tmp/kubejob-status`, status),
-	}); err != nil {
-		log.Print("failed to send test status")
+	if _, err := e.exec([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
+		log.Print("failed to send test status: ", err)
 	}
 	return out, errTest
 }
