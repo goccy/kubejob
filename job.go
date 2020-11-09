@@ -8,11 +8,14 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	_ "unsafe"
 
 	"github.com/rs/xid"
 	"golang.org/x/sync/errgroup"
@@ -20,6 +23,8 @@ import (
 	batch "k8s.io/api/batch/v1"
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/httpstream"
+	rcutil "k8s.io/apimachinery/pkg/util/remotecommand"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -240,6 +245,7 @@ type JobExecutor struct {
 	disabledCommandLog   bool
 	transport            http.RoundTripper
 	upgrader             spdy.Upgrader
+	protocols            []string
 }
 
 type buffer struct {
@@ -281,12 +287,14 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 		}, scheme.ParameterCodec)
 	url := req.URL()
 	start := time.Now()
-	exec, err := remotecommand.NewSPDYExecutorForTransports(e.transport, e.upgrader, "POST", url)
-	if err != nil {
-		return nil, xerrors.Errorf("failed to create spdy executor: %w", err)
-	}
+	/*
+		exec, err := remotecommand.NewSPDYExecutorForTransports(e.transport, e.upgrader, "POST", url)
+		if err != nil {
+			return nil, xerrors.Errorf("failed to create spdy executor: %w", err)
+		}
+	*/
 	buf := newBuffer()
-	if err := exec.Stream(remotecommand.StreamOptions{
+	if err := e.stream("POST", url, remotecommand.StreamOptions{
 		Stdin:  nil,
 		Stdout: buf,
 		Stderr: buf,
@@ -297,6 +305,64 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 	}
 	fmt.Println("exec time = ", time.Since(start).Seconds())
 	return buf.Bytes(), nil
+}
+
+type streamCreator interface {
+	CreateStream(headers http.Header) (httpstream.Stream, error)
+}
+
+type streamProtocolHandler interface {
+	stream(conn streamCreator) error
+}
+
+//go:linkname newStreamProtocolV4 k8s.io/client-go/tools/remotecommand.newStreamProtocolV4
+func newStreamProtocolV4(remotecommand.StreamOptions) streamProtocolHandler
+
+//go:linkname newStreamProtocolV3 k8s.io/client-go/tools/remotecommand.newStreamProtocolV3
+func newStreamProtocolV3(remotecommand.StreamOptions) streamProtocolHandler
+
+//go:linkname newStreamProtocolV2 k8s.io/client-go/tools/remotecommand.newStreamProtocolV2
+func newStreamProtocolV2(remotecommand.StreamOptions) streamProtocolHandler
+
+//go:linkname newStreamProtocolV1 k8s.io/client-go/tools/remotecommand.newStreamProtocolV1
+func newStreamProtocolV1(remotecommand.StreamOptions) streamProtocolHandler
+
+func (e *JobExecutor) stream(method string, url *url.URL, options remotecommand.StreamOptions) error {
+	req, err := http.NewRequest(method, url.String(), nil)
+	if err != nil {
+		return fmt.Errorf("error creating request: %v", err)
+	}
+
+	start := time.Now()
+	conn, protocol, err := spdy.Negotiate(
+		e.upgrader,
+		&http.Client{Transport: e.transport},
+		req,
+		e.protocols...,
+	)
+	if err != nil {
+		return err
+	}
+	fmt.Println("negotiate time = ", time.Since(start).Seconds())
+	defer conn.Close()
+
+	var streamer streamProtocolHandler
+
+	switch protocol {
+	case rcutil.StreamProtocolV4Name:
+		streamer = newStreamProtocolV4(options)
+	case rcutil.StreamProtocolV3Name:
+		streamer = newStreamProtocolV3(options)
+	case rcutil.StreamProtocolV2Name:
+		streamer = newStreamProtocolV2(options)
+	case "":
+		//klog.V(4).Infof("The server did not negotiate a streaming protocol version. Falling back to %s", remotecommand.StreamProtocolV1Name)
+		fallthrough
+	case rcutil.StreamProtocolV1Name:
+		streamer = newStreamProtocolV1(options)
+	}
+
+	return streamer.stream(conn)
 }
 
 func (e *JobExecutor) Exec() ([]byte, error) {
@@ -353,6 +419,12 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 			disabledContainerLog: j.disabledContainerLog,
 			transport:            transport,
 			upgrader:             upgrader,
+			protocols: []string{
+				rcutil.StreamProtocolV4Name,
+				rcutil.StreamProtocolV3Name,
+				rcutil.StreamProtocolV2Name,
+				rcutil.StreamProtocolV1Name,
+			},
 		})
 		j.Job.Spec.Template.Spec.Containers[idx].Command = []string{"sh"}
 		j.Job.Spec.Template.Spec.Containers[idx].Args = []string{"-c", jobCommandTemplate}
