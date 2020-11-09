@@ -276,12 +276,12 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 			Stderr:    true,
 		}, scheme.ParameterCodec)
 	url := req.URL()
+	start := time.Now()
 	exec, err := remotecommand.NewSPDYExecutor(e.config, "POST", url)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to create spdy executor: %w", err)
 	}
 	buf := newBuffer()
-	start := time.Now()
 	if err := exec.Stream(remotecommand.StreamOptions{
 		Stdin:  nil,
 		Stdout: buf,
