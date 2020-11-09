@@ -296,8 +296,8 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 	buf := newBuffer()
 	if err := e.stream("POST", url, remotecommand.StreamOptions{
 		Stdin:  nil,
-		Stdout: buf,
-		Stderr: buf,
+		Stdout: os.Stdout, //buf,
+		Stderr: os.Stderr, //buf,
 		Tty:    false,
 	}); err != nil {
 		fmt.Println("exec time = ", time.Since(start).Seconds())
