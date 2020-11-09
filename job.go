@@ -260,14 +260,14 @@ func newBuffer() *buffer {
 }
 
 func (b *buffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	//b.mu.Lock()
+	//defer b.mu.Unlock()
 	return b.buf.Write(p)
 }
 
 func (b *buffer) Bytes() []byte {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	//b.mu.Lock()
+	//defer b.mu.Unlock()
 	return b.buf.Bytes()
 }
 
