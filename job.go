@@ -444,24 +444,29 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 			}
 			switch pod.Status.Phase {
 			case core.PodRunning:
-				var callbackErr error
 				once.Do(func() {
-					if j.podRunningCallback != nil {
-						callbackErr = j.podRunningCallback(pod)
-					}
 					eg.Go(func() error {
-						if err := j.logStreamPod(ctx, pod); err != nil {
-							return xerrors.Errorf("failed to log stream pod: %w", err)
+						if err := j.logStreamInitContainers(ctx, pod); err != nil {
+							return xerrors.Errorf("failed to log stream init container: %w", err)
+						}
+						if j.podRunningCallback != nil {
+							if err := j.podRunningCallback(pod); err != nil {
+								return xerrors.Errorf("failed to callback for pod running: %w", err)
+							}
+						} else {
+							if err := j.logStreamPod(ctx, pod); err != nil {
+								return xerrors.Errorf("failed to log stream pod: %w", err)
+							}
 						}
 						return nil
 					})
 				})
-				if callbackErr != nil {
-					return xerrors.Errorf("failed to callback for pod running: %w", callbackErr)
-				}
 			case core.PodSucceeded, core.PodFailed:
 				once.Do(func() {
 					eg.Go(func() error {
+						if err := j.logStreamInitContainers(ctx, pod); err != nil {
+							return xerrors.Errorf("failed to log stream init container: %w", err)
+						}
 						if err := j.logStreamPod(ctx, pod); err != nil {
 							return xerrors.Errorf("failed to log stream pod: %w", err)
 						}
@@ -514,8 +519,7 @@ func (j *Job) commandLog(pod *core.Pod, container core.Container) *ContainerLog 
 	}
 }
 
-func (j *Job) logStreamPod(ctx context.Context, pod *core.Pod) error {
-	var eg errgroup.Group
+func (j *Job) logStreamInitContainers(ctx context.Context, pod *core.Pod) error {
 	for _, container := range pod.Spec.InitContainers {
 		enabledLog := !j.disabledInitContainerLog
 		if err := j.logStreamContainer(
@@ -525,9 +529,14 @@ func (j *Job) logStreamPod(ctx context.Context, pod *core.Pod) error {
 			j.enabledInitCommandLog(),
 			enabledLog,
 		); err != nil {
-			return xerrors.Errorf("failed to log stream container: %w", err)
+			return xerrors.Errorf("failed to log stream: %w", err)
 		}
 	}
+	return nil
+}
+
+func (j *Job) logStreamPod(ctx context.Context, pod *core.Pod) error {
+	var eg errgroup.Group
 	for _, container := range pod.Spec.Containers {
 		container := container
 		eg.Go(func() error {
