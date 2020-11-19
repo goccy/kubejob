@@ -235,6 +235,8 @@ type JobExecutor struct {
 	config               *rest.Config
 	disabledContainerLog bool
 	disabledCommandLog   bool
+	isRunning            bool
+	err                  error
 }
 
 type buffer struct {
@@ -286,6 +288,9 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 }
 
 func (e *JobExecutor) Exec() ([]byte, error) {
+	if e.isRunning {
+		return nil, xerrors.Errorf("failed to exec: job is already running")
+	}
 	if !e.disabledCommandLog {
 		fmt.Println(strings.Join(append(e.command, e.args...), " "))
 	}
@@ -293,7 +298,10 @@ func (e *JobExecutor) Exec() ([]byte, error) {
 		status  int
 		errTest error
 	)
+	e.isRunning = true
 	out, err := e.exec(append(e.command, e.args...))
+	e.isRunning = false
+	e.err = err
 	if err != nil {
 		status = 1
 		errTest = &FailedJob{Pod: e.pod}
@@ -302,6 +310,34 @@ func (e *JobExecutor) Exec() ([]byte, error) {
 		log.Print("failed to send test status: ", err)
 	}
 	return out, errTest
+}
+
+func (e *JobExecutor) ExecAsync() error {
+	if e.isRunning {
+		return xerrors.Errorf("failed to exec: job is already running")
+	}
+	if !e.disabledCommandLog {
+		fmt.Println(strings.Join(append(e.command, e.args...), " "))
+	}
+	e.isRunning = true
+	go func() {
+		_, err := e.exec(append(e.command, e.args...))
+		e.isRunning = false
+		e.err = err
+		var status int
+		if err != nil {
+			status = 1
+		}
+		e.exec([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"})
+	}()
+	return nil
+}
+
+func (e *JobExecutor) Stop() error {
+	if _, err := e.exec([]string{"echo", "0", ">", "/tmp/kubejob-status"}); err != nil {
+		return xerrors.Errorf("failed to force stop process: %w", err)
+	}
+	return nil
 }
 
 type JobExecutionHandler func([]*JobExecutor) error
@@ -340,6 +376,13 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 		}
 		if err := handler(executors); err != nil {
 			return xerrors.Errorf("failed to handle executors: %w", err)
+		}
+		for _, executor := range executors {
+			if executor.isRunning {
+				if err := executor.Stop(); err != nil {
+					return xerrors.Errorf("failed to stop: %w", err)
+				}
+			}
 		}
 		return nil
 	}
@@ -467,8 +510,10 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 						if err := j.logStreamInitContainers(ctx, pod); err != nil {
 							return xerrors.Errorf("failed to log stream init container: %w", err)
 						}
-						if err := j.logStreamPod(ctx, pod); err != nil {
-							return xerrors.Errorf("failed to log stream pod: %w", err)
+						if j.podRunningCallback == nil {
+							if err := j.logStreamPod(ctx, pod); err != nil {
+								return xerrors.Errorf("failed to log stream pod: %w", err)
+							}
 						}
 						return nil
 					})
