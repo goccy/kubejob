@@ -195,3 +195,100 @@ func Test_RunnerWithInitContainers(t *testing.T) {
 		t.Fatalf("failed to run: %+v", err)
 	}
 }
+
+func Test_RunnerWithSideCar(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			Spec: batchv1.JobSpec{
+				Template: apiv1.PodTemplateSpec{
+					Spec: apiv1.PodSpec{
+						Containers: []apiv1.Container{
+							{
+								Name:    "main",
+								Image:   "golang:1.15",
+								Command: []string{"echo", "hello"},
+							},
+							{
+								Name:    "sidecar",
+								Image:   "nginx:latest",
+								Command: []string{"nginx"},
+							},
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to build job: %+v", err)
+		}
+		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+			for _, exec := range executors {
+				if exec.Container.Name == "sidecar" {
+					exec.ExecAsync()
+				} else {
+					out, err := exec.Exec()
+					if err != nil {
+						t.Fatalf("%s: %+v", string(out), err)
+					}
+					t.Log(string(out))
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("failed to run: %+v", err)
+		}
+	})
+	t.Run("failure", func(t *testing.T) {
+		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			Spec: batchv1.JobSpec{
+				Template: apiv1.PodTemplateSpec{
+					Spec: apiv1.PodSpec{
+						Containers: []apiv1.Container{
+							{
+								Name:    "main",
+								Image:   "golang:1.15",
+								Command: []string{"cat", "fuga"},
+							},
+							{
+								Name:    "sidecar",
+								Image:   "nginx:latest",
+								Command: []string{"nginx"},
+							},
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to build job: %+v", err)
+		}
+		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+			for _, exec := range executors {
+				if exec.Container.Name == "sidecar" {
+					exec.ExecAsync()
+				} else {
+					out, err := exec.Exec()
+					if err == nil {
+						t.Fatal("expect error")
+					}
+					if string(out) != "cat: fuga: No such file or directory\n" {
+						t.Fatalf("cannot get output %q", string(out))
+					}
+					var failedJob *kubejob.FailedJob
+					if xerrors.As(err, &failedJob) {
+						for _, container := range failedJob.FailedContainers() {
+							if container.Name != "main" {
+								t.Fatalf("cannot get valid container: %s", container.Name)
+							}
+						}
+					} else {
+						t.Fatal("cannot get FailedJob")
+					}
+				}
+			}
+			return nil
+		}); err == nil {
+			t.Fatal("expect error")
+		}
+	})
+}
