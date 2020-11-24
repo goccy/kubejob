@@ -137,6 +137,7 @@ func (b *JobBuilder) Build() (*Job, error) {
 					RestartPolicy: core.RestartPolicyNever,
 				},
 			},
+			BackoffLimit: new(int32),
 		},
 	})
 }
@@ -162,6 +163,9 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 	}
 	if jobSpec.Spec.Template.Spec.RestartPolicy == "" {
 		jobSpec.Spec.Template.Spec.RestartPolicy = core.RestartPolicyNever
+	}
+	if jobSpec.Spec.BackoffLimit == nil {
+		jobSpec.Spec.BackoffLimit = new(int32)
 	}
 	for idx := range jobSpec.Spec.Template.Spec.Containers {
 		if jobSpec.Spec.Template.Spec.Containers[idx].Name == "" {
@@ -352,12 +356,12 @@ exit $(cat /tmp/kubejob-status)
 `
 
 func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler) error {
-	executors := []*JobExecutor{}
+	executorMap := map[string]*JobExecutor{}
 	for idx := range j.Job.Spec.Template.Spec.Containers {
 		container := j.Job.Spec.Template.Spec.Containers[idx]
 		command := container.Command
 		args := container.Args
-		executors = append(executors, &JobExecutor{
+		executorMap[container.Name] = &JobExecutor{
 			Container:            container,
 			command:              command,
 			args:                 args,
@@ -365,29 +369,55 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 			config:               j.config,
 			disabledCommandLog:   j.disabledCommandLog,
 			disabledContainerLog: j.disabledContainerLog,
-		})
+		}
 		j.Job.Spec.Template.Spec.Containers[idx].Command = []string{"sh"}
 		j.Job.Spec.Template.Spec.Containers[idx].Args = []string{"-c", jobCommandTemplate}
 	}
 	j.DisableCommandLog()
+	existsErrContainer := false
+	var callbackPod *core.Pod
+	ctx, cancel := context.WithCancel(ctx)
 	j.podRunningCallback = func(pod *core.Pod) error {
-		for _, exec := range executors {
-			exec.pod = pod
+		callbackPod = pod
+		forceStop := false
+		executors := []*JobExecutor{}
+		for _, container := range pod.Spec.Containers {
+			if executor, exists := executorMap[container.Name]; exists {
+				executor.pod = pod
+				executors = append(executors, executor)
+			} else {
+				// found injected container.
+				// Since kubejob cannot handle termination of this container, use forceStop logic
+				forceStop = true
+			}
 		}
 		if err := handler(executors); err != nil {
 			return xerrors.Errorf("failed to handle executors: %w", err)
 		}
 		for _, executor := range executors {
+			if executor.err != nil {
+				existsErrContainer = true
+			}
 			if executor.isRunning {
 				if err := executor.Stop(); err != nil {
-					return xerrors.Errorf("failed to stop: %w", err)
+					log.Printf("failed to stop: %+v", err)
+					forceStop = true
 				}
 			}
+		}
+		if forceStop {
+			cancel()
 		}
 		return nil
 	}
 	if err := j.Run(ctx); err != nil {
 		return xerrors.Errorf("failed to run job: %w", err)
+	}
+
+	// if call cancel() to stop all containers, return `nil` error from Run() loop.
+	// So, existsErrContainer check whether exists stopped container with failed status.
+	if existsErrContainer {
+		return &FailedJob{Pod: callbackPod}
 	}
 	return nil
 }
@@ -480,7 +510,7 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 		for event := range watcher.ResultChan() {
 			pod = event.Object.(*core.Pod)
 			if ctx.Err() != nil {
-				return xerrors.Errorf("context error: %w", ctx.Err())
+				return nil
 			}
 			if pod.Status.Phase == phase {
 				continue
@@ -655,9 +685,6 @@ func (j *Job) logStreamContainer(ctx context.Context, pod *core.Pod, container c
 
 	select {
 	case <-ctx.Done():
-		if err := ctx.Err(); err != nil {
-			return xerrors.Errorf("context error: %w", err)
-		}
 		return nil
 	case err := <-errchan:
 		if err != nil {
