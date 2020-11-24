@@ -137,6 +137,7 @@ func (b *JobBuilder) Build() (*Job, error) {
 					RestartPolicy: core.RestartPolicyNever,
 				},
 			},
+			BackoffLimit: new(int32),
 		},
 	})
 }
@@ -162,6 +163,9 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 	}
 	if jobSpec.Spec.Template.Spec.RestartPolicy == "" {
 		jobSpec.Spec.Template.Spec.RestartPolicy = core.RestartPolicyNever
+	}
+	if jobSpec.Spec.BackoffLimit == nil {
+		jobSpec.Spec.BackoffLimit = new(int32)
 	}
 	for idx := range jobSpec.Spec.Template.Spec.Containers {
 		if jobSpec.Spec.Template.Spec.Containers[idx].Name == "" {
