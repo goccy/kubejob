@@ -379,14 +379,16 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 	ctx, cancel := context.WithCancel(ctx)
 	j.podRunningCallback = func(pod *core.Pod) error {
 		callbackPod = pod
-		existsInjectedContainer := false
+		forceStop := false
 		executors := []*JobExecutor{}
 		for _, container := range pod.Spec.Containers {
 			if executor, exists := executorMap[container.Name]; exists {
 				executor.pod = pod
 				executors = append(executors, executor)
 			} else {
-				existsInjectedContainer = true
+				// found injected container.
+				// Since kubejob cannot handle termination of this container, use forceStop logic
+				forceStop = true
 			}
 		}
 		if err := handler(executors); err != nil {
@@ -398,12 +400,12 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 			}
 			if executor.isRunning {
 				if err := executor.Stop(); err != nil {
-					return xerrors.Errorf("failed to stop: %w", err)
+					log.Printf("failed to stop: %+v", err)
+					forceStop = true
 				}
 			}
 		}
-		if existsInjectedContainer {
-			// force stop
+		if forceStop {
 			cancel()
 		}
 		return nil
@@ -412,7 +414,7 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 		return xerrors.Errorf("failed to run job: %w", err)
 	}
 
-	// if call cancel() to stop all containers, return Run() loop with `nil` error.
+	// if call cancel() to stop all containers, return `nil` error from Run() loop.
 	// So, existsErrContainer check whether exists stopped container with failed status.
 	if existsErrContainer {
 		return &FailedJob{Pod: callbackPod}
