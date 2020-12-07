@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 
@@ -26,6 +25,10 @@ import (
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+)
+
+const (
+	kubejobLabel = "kubejob.io/id"
 )
 
 type FailedJob struct {
@@ -98,8 +101,8 @@ func (b *JobBuilder) containerName() string {
 	return b.generateName("kubejob-container")
 }
 
-func (b *JobBuilder) labelName() string {
-	return b.generateName("kubejob-label")
+func (b *JobBuilder) labelID() string {
+	return xid.New().String()
 }
 
 func (b *JobBuilder) generateName(name string) string {
@@ -172,11 +175,10 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 			jobSpec.Spec.Template.Spec.Containers[idx].Name = b.containerName()
 		}
 	}
-	labelName := b.labelName()
 	if jobSpec.Spec.Template.Labels == nil {
 		jobSpec.Spec.Template.Labels = map[string]string{}
 	}
-	jobSpec.Spec.Template.Labels[labelName] = labelName
+	jobSpec.Spec.Template.Labels[kubejobLabel] = b.labelID()
 	return &Job{
 		Job:        jobSpec,
 		jobClient:  jobClient,
@@ -487,16 +489,8 @@ func (j *Job) wait(ctx context.Context) error {
 
 func (j *Job) labelSelector() string {
 	labels := j.Spec.Template.Labels
-	keys := []string{}
-	for k := range labels {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	sels := []string{}
-	for _, k := range keys {
-		sels = append(sels, fmt.Sprintf("%s=%s", k, labels[k]))
-	}
-	return strings.Join(sels, ",")
+	value := labels[kubejobLabel]
+	return fmt.Sprintf("%s=%s", kubejobLabel, value)
 }
 
 func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) {
