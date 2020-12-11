@@ -72,6 +72,83 @@ func Test_RunWithVerboseLog(t *testing.T) {
 	}
 }
 
+func Test_CaptureVerboseLog(t *testing.T) {
+	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		Spec: batchv1.JobSpec{
+			Template: apiv1.PodTemplateSpec{
+				Spec: apiv1.PodSpec{
+					Containers: []apiv1.Container{
+						{
+							Name:    "test",
+							Image:   "golang:1.15",
+							Command: []string{"echo", "hello"},
+						},
+					},
+				},
+			},
+		},
+	})
+	job.SetVerboseLog(true)
+	logs := []string{}
+	job.SetLogger(func(log string) {
+		logs = append(logs, log)
+	})
+	if err != nil {
+		t.Fatalf("failed to build job: %+v", err)
+	}
+	if err := job.Run(context.Background()); err != nil {
+		t.Fatalf("failed to run: %+v", err)
+	}
+	if len(logs) == 0 {
+		t.Fatal("failed to capture verbose log")
+	}
+}
+
+func Test_RunWithContainerLogger(t *testing.T) {
+	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		Spec: batchv1.JobSpec{
+			Template: apiv1.PodTemplateSpec{
+				Spec: apiv1.PodSpec{
+					Containers: []apiv1.Container{
+						{
+							Name:    "test",
+							Image:   "golang:1.15",
+							Command: []string{"echo", "hello"},
+						},
+					},
+				},
+			},
+		},
+	})
+	var (
+		callbacked      bool
+		containerLogErr error
+	)
+	job.SetContainerLogger(func(log *kubejob.ContainerLog) {
+		callbacked = true
+		if log.Pod == nil {
+			containerLogErr = xerrors.Errorf("could not find ContainerLog.Pod")
+			return
+		}
+		if log.Container.Name != "test" {
+			containerLogErr = xerrors.Errorf("could not find ContainerLog.Container %s", log.Container.Name)
+			return
+		}
+	})
+	if err != nil {
+		t.Fatalf("failed to build job: %+v", err)
+	}
+	if err := job.Run(context.Background()); err != nil {
+		t.Fatalf("failed to run: %+v", err)
+	}
+	if !callbacked {
+		t.Fatal("doesn't work ContainerLogger")
+	}
+	if containerLogErr != nil {
+		t.Fatal(containerLogErr)
+	}
+}
+
 func Test_RunnerWithExecutionHandler(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
