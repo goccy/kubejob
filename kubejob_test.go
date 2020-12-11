@@ -47,6 +47,31 @@ func Test_Run(t *testing.T) {
 	}
 }
 
+func Test_RunWithVerboseLog(t *testing.T) {
+	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		Spec: batchv1.JobSpec{
+			Template: apiv1.PodTemplateSpec{
+				Spec: apiv1.PodSpec{
+					Containers: []apiv1.Container{
+						{
+							Name:    "test",
+							Image:   "golang:1.15",
+							Command: []string{"echo", "hello"},
+						},
+					},
+				},
+			},
+		},
+	})
+	job.SetVerboseLog(true)
+	if err != nil {
+		t.Fatalf("failed to build job: %+v", err)
+	}
+	if err := job.Run(context.Background()); err != nil {
+		t.Fatalf("failed to run: %+v", err)
+	}
+}
+
 func Test_RunnerWithExecutionHandler(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
