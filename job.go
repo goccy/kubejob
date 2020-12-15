@@ -195,21 +195,32 @@ type Job struct {
 	restClient               rest.Interface
 	containerLogs            chan *ContainerLog
 	logger                   Logger
+	containerLogger          ContainerLogger
 	disabledInitContainerLog bool
 	disabledInitCommandLog   bool
 	disabledContainerLog     bool
 	disabledCommandLog       bool
+	verboseLog               bool
 	config                   *rest.Config
 	podRunningCallback       func(*core.Pod) error
 }
 
-type Logger func(*ContainerLog)
+type ContainerLogger func(*ContainerLog)
+type Logger func(string)
 
 type ContainerLog struct {
 	Pod        *core.Pod
 	Container  core.Container
 	Log        string
 	IsFinished bool
+}
+
+func (j *Job) SetVerboseLog(verboseLog bool) {
+	j.verboseLog = verboseLog
+}
+
+func (j *Job) SetContainerLogger(logger ContainerLogger) {
+	j.containerLogger = logger
 }
 
 func (j *Job) SetLogger(logger Logger) {
@@ -233,38 +244,18 @@ func (j *Job) DisableCommandLog() {
 }
 
 type JobExecutor struct {
-	Container            core.Container
-	pod                  *core.Pod
-	command              []string
-	args                 []string
-	restClient           rest.Interface
-	config               *rest.Config
-	disabledContainerLog bool
-	disabledCommandLog   bool
-	isRunning            bool
-	err                  error
-}
-
-type buffer struct {
-	buf bytes.Buffer
-	mu  sync.Mutex
-}
-
-func (b *buffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *buffer) Bytes() []byte {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Bytes()
+	Container core.Container
+	pod       *core.Pod
+	command   []string
+	args      []string
+	job       *Job
+	isRunning bool
+	err       error
 }
 
 func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 	pod := e.pod
-	req := e.restClient.Post().
+	req := e.job.restClient.Post().
 		Namespace(pod.Namespace).
 		Resource("pods").
 		Name(pod.Name).
@@ -277,27 +268,31 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 			Stderr:    true,
 		}, scheme.ParameterCodec)
 	url := req.URL()
-	exec, err := remotecommand.NewSPDYExecutor(e.config, "POST", url)
+	exec, err := remotecommand.NewSPDYExecutor(e.job.config, "POST", url)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to create spdy executor: %w", err)
 	}
-	buf := &buffer{}
-	if err := exec.Stream(remotecommand.StreamOptions{
-		Stdin:  nil,
-		Stdout: buf,
-		Stderr: buf,
-		Tty:    false,
-	}); err != nil {
-		return buf.Bytes(), xerrors.Errorf("faield to exec command: %w", err)
-	}
-	return buf.Bytes(), nil
+	r, w := io.Pipe()
+	var streamErr error
+	go func() {
+		streamErr = exec.Stream(remotecommand.StreamOptions{
+			Stdin:  nil,
+			Stdout: w,
+			Stderr: w,
+			Tty:    false,
+		})
+		w.Close()
+	}()
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(r)
+	return buf.Bytes(), streamErr
 }
 
 func (e *JobExecutor) Exec() ([]byte, error) {
 	if e.isRunning {
 		return nil, xerrors.Errorf("failed to exec: job is already running")
 	}
-	if !e.disabledCommandLog {
+	if !e.job.disabledCommandLog {
 		fmt.Println(strings.Join(append(e.command, e.args...), " "))
 	}
 	var (
@@ -313,7 +308,7 @@ func (e *JobExecutor) Exec() ([]byte, error) {
 		errTest = &FailedJob{Pod: e.pod}
 	}
 	if _, err := e.exec([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
-		log.Print("failed to send test status: ", err)
+		e.job.logf("[WARN] failed to send test status: %s", err)
 	}
 	return out, errTest
 }
@@ -322,7 +317,7 @@ func (e *JobExecutor) ExecAsync() error {
 	if e.isRunning {
 		return xerrors.Errorf("failed to exec: job is already running")
 	}
-	if !e.disabledCommandLog {
+	if !e.job.disabledCommandLog {
 		fmt.Println(strings.Join(append(e.command, e.args...), " "))
 	}
 	e.isRunning = true
@@ -334,7 +329,9 @@ func (e *JobExecutor) ExecAsync() error {
 		if err != nil {
 			status = 1
 		}
-		e.exec([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"})
+		if _, err := e.exec([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
+			e.job.logf("[WARN] failed to send status in async executor: %s", err)
+		}
 	}()
 	return nil
 }
@@ -364,13 +361,10 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 		command := container.Command
 		args := container.Args
 		executorMap[container.Name] = &JobExecutor{
-			Container:            container,
-			command:              command,
-			args:                 args,
-			restClient:           j.restClient,
-			config:               j.config,
-			disabledCommandLog:   j.disabledCommandLog,
-			disabledContainerLog: j.disabledContainerLog,
+			Container: container,
+			command:   command,
+			args:      args,
+			job:       j,
 		}
 		j.Job.Spec.Template.Spec.Containers[idx].Command = []string{"sh"}
 		j.Job.Spec.Template.Spec.Containers[idx].Args = []string{"-c", jobCommandTemplate}
@@ -424,31 +418,52 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 	return nil
 }
 
+func (j *Job) cleanup() error {
+	j.logf("cleanup job %s", j.Name)
+	multierr := []string{}
+	if err := j.jobClient.Delete(j.Name, &metav1.DeleteOptions{
+		GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
+	}); err != nil {
+		multierr = append(multierr, xerrors.Errorf("failed to delete job %s: %w", j.Name, err).Error())
+	}
+	podList, err := j.podClient.List(metav1.ListOptions{
+		LabelSelector: j.labelSelector(),
+	})
+	if err != nil {
+		multierr = append(multierr, xerrors.Errorf("failed to list pod: %w", err).Error())
+	}
+	if podList == nil || len(podList.Items) == 0 {
+		j.logf("[WARN] could not find pod to remove")
+		if len(multierr) > 0 {
+			return xerrors.Errorf(strings.Join(multierr, ":"))
+		}
+		return nil
+	}
+	j.logf("%d pods found", len(podList.Items))
+	for _, pod := range podList.Items {
+		j.logf("delete pod: %s", pod.Name)
+		if err := j.podClient.Delete(pod.Name, &metav1.DeleteOptions{
+			GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
+		}); err != nil {
+			multierr = append(multierr, xerrors.Errorf("failed to delete pod %s: %w", pod.Name, err).Error())
+		}
+	}
+	if len(multierr) > 0 {
+		return xerrors.Errorf(strings.Join(multierr, ":"))
+	}
+	return nil
+}
+
 func (j *Job) Run(ctx context.Context) (e error) {
 	if _, err := j.jobClient.Create(j.Job); err != nil {
 		return xerrors.Errorf("failed to create job: %w", err)
 	}
 	defer func() {
-		if err := j.jobClient.Delete(j.Name, nil); err != nil {
-			e = xerrors.Errorf("failed to delete job: %w", err)
-		}
-		podList, _ := j.podClient.List(metav1.ListOptions{
-			LabelSelector: j.labelSelector(),
-		})
-		if podList == nil {
-			return
-		}
-		if len(podList.Items) == 0 {
-			return
-		}
-		for _, pod := range podList.Items {
-			if err := j.podClient.Delete(pod.Name, &metav1.DeleteOptions{}); err != nil {
-				err = xerrors.Errorf("failed to delete pod: %w", err)
-				if e == nil {
-					e = err
-				} else {
-					e = xerrors.Errorf(strings.Join([]string{e.Error(), err.Error()}, "\n"))
-				}
+		if err := j.cleanup(); err != nil {
+			if e == nil {
+				e = err
+			} else {
+				e = xerrors.Errorf(strings.Join([]string{e.Error(), err.Error()}, ":"))
 			}
 		}
 	}()
@@ -456,11 +471,7 @@ func (j *Job) Run(ctx context.Context) (e error) {
 	j.containerLogs = make(chan *ContainerLog)
 	go func() {
 		for containerLog := range j.containerLogs {
-			if j.logger != nil {
-				j.logger(containerLog)
-			} else if !containerLog.IsFinished {
-				fmt.Fprintf(os.Stderr, "%s", containerLog.Log)
-			}
+			j.containerLog(containerLog)
 		}
 	}()
 
@@ -469,6 +480,29 @@ func (j *Job) Run(ctx context.Context) (e error) {
 	}
 
 	return nil
+}
+
+func (j *Job) containerLog(log *ContainerLog) {
+	if j.containerLogger != nil {
+		j.containerLogger(log)
+	} else if !log.IsFinished {
+		fmt.Fprintf(os.Stderr, "%s", log.Log)
+	}
+}
+
+func (j *Job) logf(format string, args ...interface{}) {
+	if !j.verboseLog {
+		return
+	}
+	if format == "" {
+		return
+	}
+	log := fmt.Sprintf(format, args...)
+	if j.logger != nil {
+		j.logger(log)
+	} else {
+		fmt.Fprintf(os.Stderr, "%s\n", log)
+	}
 }
 
 func (j *Job) wait(ctx context.Context) error {
