@@ -46,9 +46,9 @@ test:
 	{ \
 	set -e ;\
 	while true; do \
-		podname=$(shell KUBECONFIG=$(KUBECONFIG) kubectl get pod | grep Running | grep kubejob-deployment | awk '{print $$1}'); \
-		if [ "$$podname" != "" ]; then \
-			kubectl exec -it $$podname -- go test -v ./ -count=1; \
+		POD_NAME=$$(KUBECONFIG=$(KUBECONFIG) kubectl get pod | grep Running | grep kubejob-deployment | awk '{print $$1}'); \
+		if [ "$$POD_NAME" != "" ]; then \
+			kubectl exec -it $$POD_NAME -- go test -v ./ -count=1; \
 			exit $$?; \
 		fi; \
 		sleep 1; \
