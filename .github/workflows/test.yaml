@@ -11,4 +11,4 @@ jobs:
         make deploy
     - name: Run test
       run: |
-        timeout 300 make test
+        make test
