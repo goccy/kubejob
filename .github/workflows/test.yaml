@@ -12,3 +12,6 @@ jobs:
     - name: Run test
       run: |
         timeout 300 make test
+    - name: Report coverage
+      run: |
+        bash <(curl -s https://codecov.io/bash)

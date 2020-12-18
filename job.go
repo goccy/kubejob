@@ -308,7 +308,7 @@ func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
 	for backoff.Continue(b) {
 		out, err = e.exec(cmd)
 		if err != nil && strings.Contains(err.Error(), "ssh: rejected") {
-			// cannot connect to Pod. try to retry....
+			// cannot connect to Pod. retry....
 			e.job.logf("[WARN] connection refused. retry: %d/%d", retryCount, ExecRetryCount)
 			retryCount++
 			continue
