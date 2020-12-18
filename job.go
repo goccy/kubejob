@@ -10,7 +10,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/lestrrat-go/backoff"
 	"github.com/rs/xid"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/xerrors"
@@ -28,7 +30,8 @@ import (
 )
 
 const (
-	kubejobLabel = "kubejob.io/id"
+	KubejobLabel   = "kubejob.io/id"
+	ExecRetryCount = 10
 )
 
 type FailedJob struct {
@@ -178,7 +181,8 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 	if jobSpec.Spec.Template.Labels == nil {
 		jobSpec.Spec.Template.Labels = map[string]string{}
 	}
-	jobSpec.Spec.Template.Labels[kubejobLabel] = b.labelID()
+	jobSpec.Spec.Template.Labels[KubejobLabel] = b.labelID()
+
 	return &Job{
 		Job:        jobSpec,
 		jobClient:  jobClient,
@@ -245,7 +249,7 @@ func (j *Job) DisableCommandLog() {
 
 type JobExecutor struct {
 	Container core.Container
-	pod       *core.Pod
+	Pod       *core.Pod
 	command   []string
 	args      []string
 	job       *Job
@@ -254,7 +258,7 @@ type JobExecutor struct {
 }
 
 func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
-	pod := e.pod
+	pod := e.Pod
 	req := e.job.restClient.Post().
 		Namespace(pod.Namespace).
 		Resource("pods").
@@ -288,6 +292,32 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 	return buf.Bytes(), streamErr
 }
 
+func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
+	var (
+		out []byte
+		err error
+	)
+	policy := backoff.NewExponential(
+		backoff.WithInterval(1*time.Second),
+		backoff.WithMaxRetries(ExecRetryCount),
+	)
+	b, cancel := policy.Start(context.Background())
+	defer cancel()
+
+	retryCount := 0
+	for backoff.Continue(b) {
+		out, err = e.exec(cmd)
+		if err != nil && strings.Contains(err.Error(), "ssh: rejected") {
+			// cannot connect to Pod. retry....
+			e.job.logf("[WARN] connection refused. retry: %d/%d", retryCount, ExecRetryCount)
+			retryCount++
+			continue
+		}
+		break
+	}
+	return out, err
+}
+
 func (e *JobExecutor) Exec() ([]byte, error) {
 	if e.isRunning {
 		return nil, xerrors.Errorf("failed to exec: job is already running")
@@ -300,14 +330,14 @@ func (e *JobExecutor) Exec() ([]byte, error) {
 		errTest error
 	)
 	e.isRunning = true
-	out, err := e.exec(append(e.command, e.args...))
+	out, err := e.execWithRetry(append(e.command, e.args...))
 	e.isRunning = false
 	e.err = err
 	if err != nil {
 		status = 1
-		errTest = &FailedJob{Pod: e.pod}
+		errTest = &FailedJob{Pod: e.Pod}
 	}
-	if _, err := e.exec([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
+	if _, err := e.execWithRetry([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
 		e.job.logf("[WARN] failed to send test status: %s", err)
 	}
 	return out, errTest
@@ -322,14 +352,14 @@ func (e *JobExecutor) ExecAsync() error {
 	}
 	e.isRunning = true
 	go func() {
-		_, err := e.exec(append(e.command, e.args...))
+		_, err := e.execWithRetry(append(e.command, e.args...))
 		e.isRunning = false
 		e.err = err
 		var status int
 		if err != nil {
 			status = 1
 		}
-		if _, err := e.exec([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
+		if _, err := e.execWithRetry([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
 			e.job.logf("[WARN] failed to send status in async executor: %s", err)
 		}
 	}()
@@ -337,7 +367,7 @@ func (e *JobExecutor) ExecAsync() error {
 }
 
 func (e *JobExecutor) Stop() error {
-	if _, err := e.exec([]string{"echo", "0", ">", "/tmp/kubejob-status"}); err != nil {
+	if _, err := e.execWithRetry([]string{"echo", "0", ">", "/tmp/kubejob-status"}); err != nil {
 		return xerrors.Errorf("failed to force stop process: %w", err)
 	}
 	return nil
@@ -379,7 +409,7 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 		executors := []*JobExecutor{}
 		for _, container := range pod.Spec.Containers {
 			if executor, exists := executorMap[container.Name]; exists {
-				executor.pod = pod
+				executor.Pod = pod
 				executors = append(executors, executor)
 			} else {
 				// found injected container.
@@ -426,6 +456,7 @@ func (j *Job) cleanup() error {
 	}); err != nil {
 		multierr = append(multierr, xerrors.Errorf("failed to delete job %s: %w", j.Name, err).Error())
 	}
+	j.logf("search by %s", j.labelSelector())
 	podList, err := j.podClient.List(metav1.ListOptions{
 		LabelSelector: j.labelSelector(),
 	})
@@ -441,7 +472,7 @@ func (j *Job) cleanup() error {
 	}
 	j.logf("%d pods found", len(podList.Items))
 	for _, pod := range podList.Items {
-		j.logf("delete pod: %s", pod.Name)
+		j.logf("delete pod: %s job-id: %s", pod.Name, pod.Labels[KubejobLabel])
 		if err := j.podClient.Delete(pod.Name, &metav1.DeleteOptions{
 			GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
 		}); err != nil {
@@ -523,8 +554,8 @@ func (j *Job) wait(ctx context.Context) error {
 
 func (j *Job) labelSelector() string {
 	labels := j.Spec.Template.Labels
-	value := labels[kubejobLabel]
-	return fmt.Sprintf("%s=%s", kubejobLabel, value)
+	value := labels[KubejobLabel]
+	return fmt.Sprintf("%s=%s", KubejobLabel, value)
 }
 
 func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) {
