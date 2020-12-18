@@ -1,5 +1,10 @@
 # kubejob
 
+[![PkgGoDev](https://pkg.go.dev/badge/github.com/goccy/kubejob)](https://pkg.go.dev/github.com/goccy/kubejob)
+![Go](https://github.com/goccy/kubejob/workflows/test/badge.svg)
+[![codecov](https://codecov.io/gh/goccy/kubejob/branch/master/graph/badge.svg)](https://codecov.io/gh/goccy/kubejob)
+
+
 CLI and Go library for Kubernetes Job
 
 # Installation
