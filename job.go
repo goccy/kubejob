@@ -575,7 +575,7 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 		var phase core.PodPhase
 		for event := range watcher.ResultChan() {
 			pod = event.Object.(*core.Pod)
-			if ctx.Err() != nil {
+			if ctx.Err() != nil && pod.Status.Phase == core.PodRunning {
 				return nil
 			}
 			if pod.Status.Phase == phase {
