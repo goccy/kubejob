@@ -234,6 +234,53 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 			t.Fatal("expect error")
 		}
 	})
+	t.Run("retry", func(t *testing.T) {
+		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			Spec: batchv1.JobSpec{
+				Template: apiv1.PodTemplateSpec{
+					Spec: apiv1.PodSpec{
+						Containers: []apiv1.Container{
+							{
+								Name:    "test",
+								Image:   "golang:1.15",
+								Command: []string{"echo", "$TEST"},
+							},
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to build job: %+v", err)
+		}
+		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+			for _, exec := range executors {
+				out, err := exec.ExecWithPodNotFoundError()
+				if err == nil {
+					t.Fatal("expect error")
+				}
+				var failedJob *kubejob.FailedJob
+				if xerrors.As(err, &failedJob) {
+					for _, container := range failedJob.FailedContainers() {
+						if container.Name != "test" {
+							t.Fatalf("cannot get valid container: %s", container.Name)
+						}
+					}
+				} else {
+					t.Fatal("cannot get FailedJob")
+				}
+				if err.Error() == "failed to job" {
+					t.Fatal("expect extra error message. but got empty")
+				}
+				if string(out) != "" {
+					t.Fatalf("expect empty output. but got %s", string(out))
+				}
+			}
+			return nil
+		}); err == nil {
+			t.Fatal("expect error")
+		}
+	})
 }
 
 func Test_RunnerWithInitContainers(t *testing.T) {

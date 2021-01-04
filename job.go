@@ -335,7 +335,7 @@ func (e *JobExecutor) Exec() ([]byte, error) {
 	e.err = err
 	if err != nil {
 		status = 1
-		errTest = &FailedJob{Pod: e.Pod}
+		errTest = xerrors.Errorf("%s: %w", err.Error(), &FailedJob{Pod: e.Pod})
 	}
 	if _, err := e.execWithRetry([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
 		e.job.logf("[WARN] failed to send test status: %s", err)
