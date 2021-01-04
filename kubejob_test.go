@@ -445,3 +445,34 @@ func Test_RunnerWithSideCar(t *testing.T) {
 		}
 	})
 }
+
+func Test_RunnerWithCancel(t *testing.T) {
+	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		Spec: batchv1.JobSpec{
+			Template: apiv1.PodTemplateSpec{
+				Spec: apiv1.PodSpec{
+					Containers: []apiv1.Container{
+						{
+							Name:    "test",
+							Image:   "golang:1.15",
+							Command: []string{"echo", "$TEST"},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to build job: %+v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cancel()
+
+	if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor) error {
+		t.Fatal("shouldn't call handler")
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to run: %+v", err)
+	}
+}
