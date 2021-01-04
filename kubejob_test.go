@@ -470,8 +470,7 @@ func Test_RunnerWithCancel(t *testing.T) {
 	cancel()
 
 	if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor) error {
-		t.Fatal("shouldn't call handler")
-		return nil
+		return fmt.Errorf("shouldn't call handler")
 	}); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
