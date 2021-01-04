@@ -8,3 +8,9 @@ func (e *JobExecutor) ExecWithPodNotFoundError() ([]byte, error) {
 	e.Stop()
 	return out, err
 }
+
+func SetExecRetryCount(retry int) func() {
+	defaultCount := ExecRetryCount
+	ExecRetryCount = retry
+	return func() { ExecRetryCount = defaultCount }
+}

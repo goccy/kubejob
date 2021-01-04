@@ -235,6 +235,9 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 		}
 	})
 	t.Run("retry", func(t *testing.T) {
+		reset := kubejob.SetExecRetryCount(3)
+		defer reset()
+
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
@@ -253,6 +256,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to build job: %+v", err)
 		}
+		job.SetVerboseLog(true)
 		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
 			for _, exec := range executors {
 				out, err := exec.ExecWithPodNotFoundError()
