@@ -27,11 +27,15 @@ import (
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+	executil "k8s.io/client-go/util/exec"
 )
 
 const (
 	KubejobLabel   = "kubejob.io/id"
-	ExecRetryCount = 10
+)
+
+var (
+	ExecRetryCount = 8
 )
 
 type FailedJob struct {
@@ -307,9 +311,12 @@ func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
 	retryCount := 0
 	for backoff.Continue(b) {
 		out, err = e.exec(cmd)
-		if err != nil && strings.Contains(err.Error(), "ssh: rejected") {
+		if err != nil {
+			if _, ok := err.(executil.ExitError); ok {
+				break
+			}
 			// cannot connect to Pod. retry....
-			e.job.logf("[WARN] connection refused. retry: %d/%d", retryCount, ExecRetryCount)
+			e.job.logf("[WARN] %s. retry: %d/%d", err, retryCount, ExecRetryCount)
 			retryCount++
 			continue
 		}
