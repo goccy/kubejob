@@ -10,6 +10,7 @@ A library for managing Kubernetes Job in Go
 
 - Creating a Kubernetes Job
 - Run and wait for Kubernetes Job
+- Can capture logs of Kubernetes Job
 - Can use `context.Context` to run Kubernetes Job
 - Delayed execution of Kubernetes Job ( also support Sidecar pattern )
 - Automatic Kubernetes Job cleanup process
