@@ -132,7 +132,7 @@ if err := job.RunWithExecutionHandler(context.Background(), func(executors []*ku
 
 ### Installation
 
-```console
+```bash
 go get github.com/goccy/kubejob/cmd/kubejob
 ```
 
@@ -141,19 +141,18 @@ Usage:
   kubejob [OPTIONS]
 
 Application Options:
-  -n, --namespace=  specify namespace (default: default)
-  -i, --image=      specify container image
-      --in-cluster  specify whether in cluster
-  -c, --config=     specify local kubeconfig path. ( default: $HOME/.kube/config )
-  -j, --job=        specify yaml or json file for written job definition
+  -n, --namespace= specify namespace (default: default)
+  -f, --file=      specify yaml or json file for written job definition
+  -i, --image=     specify container image
 
 Help Options:
-  -h, --help        Show this help message
+  -h, --help       Show this help message
 ```
 
 ### Example
 
 ```bash
 $ kubejob --image golang:1.14 -- go version
+go version
 go version go1.14.4 linux/amd64
 ```
