@@ -4,18 +4,139 @@
 ![Go](https://github.com/goccy/kubejob/workflows/test/badge.svg)
 [![codecov](https://codecov.io/gh/goccy/kubejob/branch/master/graph/badge.svg)](https://codecov.io/gh/goccy/kubejob)
 
+A library for managing Kubernetes Job in Go
 
-CLI and Go library for Kubernetes Job
+# Features
+
+- Creating a Kubernetes Job
+- Run and wait for Kubernetes Job
+- Can use `context.Context` to run Kubernetes Job
+- Delayed execution of Kubernetes Job ( also support Sidecar pattern )
+- Automatic Kubernetes Job cleanup process
 
 # Installation
 
 ```bash
-$ go get github.com/goccy/kubejob/cmd/kubejob
+$ go get github.com/goccy/kubejob
 ```
 
-# How to use CLI
+# Synopsis
 
+## Simply create and run and wait Kubernetes Job
+
+```go
+
+import (
+  "github.com/goccy/kubejob"
+  batchv1 "k8s.io/api/batch/v1"
+  apiv1 "k8s.io/api/core/v1"
+  "k8s.io/client-go/rest"
+)
+
+var cfg *rest.Config // = rest.InClusterConfig() assign *rest.Config value to cfg
+
+job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+  Spec: batchv1.JobSpec{
+    Template: apiv1.PodTemplateSpec{
+      Spec: apiv1.PodSpec{
+        Containers: []apiv1.Container{
+          {
+            Name:    "test",
+            Image:   "golang:1.15",
+            Command: []string{"echo", "hello"},
+          },
+        },
+      },
+    },
+  },
+})
+if err != nil {
+  panic(err)
+}
+
+// Run KubernetesJob and output log to stdout.
+// If Job doesn't exit status by `0` , `Run()` returns error.
+if err := job.Run(context.Background()); err != nil {
+	panic(err)
+}
 ```
+
+## Manage execution timing
+
+If you don't want to execute the Job immediately after the Pod is `Running` state, you can delay the execution timing.
+
+```go
+ctx := context.Background()
+if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor) error {
+  // callback when the Pod is in Running status.
+  // `executors` corresponds to the list of `Containers` specified in `JobSpec`
+  for _, exec := range executors { 
+    // `Exec()` executes the command
+    out, err := exec.Exec()
+    if err != nil {
+      panic(err)
+    }
+    fmt.Println(string(out), err)
+  }
+  return nil
+})
+```
+
+## Manage execution with Sidecar
+
+```go
+job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+  Spec: batchv1.JobSpec{
+    Template: apiv1.PodTemplateSpec{
+      Spec: apiv1.PodSpec{
+        Containers: []apiv1.Container{
+          {
+            Name:    "main",
+            Image:   "golang:1.15",
+            Command: []string{"echo", "hello"},
+          },
+          {
+            Name:    "sidecar",
+            Image:   "nginx:latest",
+            Command: []string{"nginx"},
+          },
+        },
+      },
+    },
+  },
+})
+if err != nil {
+  panic(err)
+}
+if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+  for _, exec := range executors {
+    if exec.Container.Name == "sidecar" {
+      // `ExecAsync()` executes the command and doesn't wait finished.
+      exec.ExecAsync()
+    } else {
+      out, err := exec.Exec()
+      if err != nil {
+        panic(err)
+      }
+      fmt.Pritln(string(out))
+    }
+  }
+  return nil
+})
+```
+
+
+# Tools
+
+## cmd/kubejob
+
+### Installation
+
+```console
+go get github.com/goccy/kubejob/cmd/kubejob
+```
+
+```console
 Usage:
   kubejob [OPTIONS]
 
@@ -30,20 +151,9 @@ Help Options:
   -h, --help        Show this help message
 ```
 
-## Example
+### Example
 
 ```bash
 $ kubejob --image golang:1.14 -- go version
 go version go1.14.4 linux/amd64
-```
-
-# How to use as a library
-
-```go
-  clientset, _ := kubernetes.NewForConfig(config)
-  job, _ := kubejob.NewJobBuilder(clientset, "default").
-      SetImage("golang:1.14").
-      SetCommand([]string{"go", "version"}).
-      Build()
-  job.Run(context.Background()) // start job and waiting for
 ```
