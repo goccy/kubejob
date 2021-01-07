@@ -4,63 +4,76 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/goccy/kubejob"
 	"github.com/jessevdk/go-flags"
 	"golang.org/x/xerrors"
-	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
 )
 
 type option struct {
 	Namespace string `description:"specify namespace" short:"n" long:"namespace" default:"default"`
+	File      string `description:"specify yaml or json file for written job definition" short:"f" long:"file"`
 	Image     string `description:"specify container image" short:"i" long:"image"`
-	InCluster bool   `description:"specify whether in cluster" long:"in-cluster"`
-	Config    string `description:"specify local kubeconfig path. ( default: $HOME/.kube/config )" short:"c" long:"config"`
-	Job       string `description:"specify yaml or json file for written job definition" short:"j" long:"job"`
 }
 
-func loadConfig(opt option) (*rest.Config, error) {
-	if opt.InCluster {
-		cfg, err := rest.InClusterConfig()
-		if err != nil {
-			return nil, xerrors.Errorf("failed to load config in cluster: %w", err)
-		}
-		return cfg, nil
+func getKubeConfig() string {
+	if v := os.Getenv("KUBECONFIG"); v != "" {
+		return v
 	}
-	p := opt.Config
-	if p == "" {
-		p = filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	home := homedir.HomeDir()
+	config := filepath.Join(home, ".kube", "config")
+	if _, err := os.Stat(config); err == nil {
+		return config
 	}
-	cfg, err := clientcmd.BuildConfigFromFlags("", p)
+	return ""
+}
+
+func loadConfig() (*rest.Config, error) {
+	cfg, err := clientcmd.BuildConfigFromFlags("", getKubeConfig())
 	if err != nil {
-		return nil, xerrors.Errorf("failed to load config from %s: %w", p, err)
+		return nil, xerrors.Errorf("failed to create config: %w", err)
 	}
 	return cfg, nil
 }
 
-func _main(args []string, opt option) error {
-	if opt.Image == "" && opt.Job == "" {
-		return xerrors.Errorf("image or job must be specified")
+func namespace(opt option) (string, error) {
+	if opt.Namespace != "" {
+		return opt.Namespace, nil
 	}
-	cfg, err := loadConfig(opt)
+	rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: getKubeConfig()}
+	c, err := rules.Load()
+	if err != nil {
+		return "", xerrors.Errorf("failed to load default namespace: %w", err)
+	}
+	return c.Contexts[c.CurrentContext].Namespace, nil
+}
+
+func _main(args []string, opt option) error {
+	if opt.Image == "" && opt.File == "" {
+		return xerrors.Errorf("image or file option must be specified")
+	}
+	cfg, err := loadConfig()
 	if err != nil {
 		return xerrors.Errorf("failed to load config: %w", err)
 	}
-	clientset, err := kubernetes.NewForConfig(cfg)
+	ns, err := namespace(opt)
 	if err != nil {
-		return xerrors.Errorf("failed to create clientset: %w", err)
+		return xerrors.Errorf("failed to get namespace: %w", err)
 	}
 	var job *kubejob.Job
-	if opt.Job != "" {
-		file, err := os.Open(opt.Job)
+	if opt.File != "" {
+		file, err := os.Open(opt.File)
 		if err != nil {
-			return xerrors.Errorf("failed to open file %s: %w", opt.Job, err)
+			return xerrors.Errorf("failed to open file %s: %w", opt.File, err)
 		}
-		j, err := kubejob.NewJobBuilder(clientset, opt.Namespace).BuildWithReader(file)
+		j, err := kubejob.NewJobBuilder(cfg, ns).BuildWithReader(file)
 		if err != nil {
 			return xerrors.Errorf("failed to build job: %w", err)
 		}
@@ -69,7 +82,7 @@ func _main(args []string, opt option) error {
 		if len(args) == 0 {
 			return xerrors.Errorf("command is required. please speficy after '--' section")
 		}
-		j, err := kubejob.NewJobBuilder(clientset, opt.Namespace).
+		j, err := kubejob.NewJobBuilder(cfg, ns).
 			SetImage(opt.Image).
 			SetCommand(args).
 			Build()
@@ -78,7 +91,19 @@ func _main(args []string, opt option) error {
 		}
 		job = j
 	}
-	if err := job.Run(context.Background()); err != nil {
+
+	ctx, cancel := context.WithCancel(context.Background())
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case s := <-interrupt:
+			fmt.Printf("receive %s. try to graceful stop\n", s)
+			cancel()
+		}
+	}()
+
+	if err := job.Run(ctx); err != nil {
 		return xerrors.Errorf("failed to run job: %w", err)
 	}
 	return nil
@@ -92,6 +117,6 @@ func main() {
 		return
 	}
 	if err := _main(args, opt); err != nil {
-		fmt.Println(err)
+		fmt.Printf("%+v", err)
 	}
 }

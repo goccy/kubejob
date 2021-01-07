@@ -29,15 +29,6 @@ test-cluster: $(KIND)
 delete-cluster: $(KIND)
 	$(KIND) delete clusters $(CLUSTER_NAME)
 
-build-image:
-	docker build -t kubejob:latest .
-
-delete-image:
-	docker image rm -f kubejob:latest
-
-upload-image: build-image
-	@$(KIND) load --name $(TEST_CLUSTER_NAME) docker-image kubejob:latest
-
 deploy: test-cluster
 	kubectl apply -f testdata/config/manifest.yaml
 	kubectl apply -f https://docs.projectcalico.org/v3.8/manifests/calico.yaml
