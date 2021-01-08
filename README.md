@@ -65,6 +65,7 @@ if err := job.Run(context.Background()); err != nil {
 ## Manage execution timing
 
 If you don't want to execute the Job immediately after the Pod is `Running` state, you can delay the execution timing.
+Also, this feature can be used if the Job has multiple containers and you want to control their execution order.
 
 ```go
 ctx := context.Background()
