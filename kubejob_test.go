@@ -2,7 +2,6 @@ package kubejob_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/goccy/kubejob"
@@ -468,10 +467,9 @@ func Test_RunnerWithCancel(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 
-	cancel()
-
 	if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor) error {
-		return fmt.Errorf("shouldn't call handler")
+		cancel()
+		return nil
 	}); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
