@@ -466,11 +466,10 @@ func Test_RunnerWithCancel(t *testing.T) {
 		t.Fatalf("failed to build job: %+v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-
 	if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor) error {
 		cancel()
 		return nil
-	}); err != nil {
-		t.Fatalf("failed to run: %+v", err)
+	}); err == nil {
+		t.Fatalf("expected error but got nil")
 	}
 }

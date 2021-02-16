@@ -569,12 +569,16 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 	var (
 		eg   errgroup.Group
 		once sync.Once
-		pod  *core.Pod
 	)
 	eg.Go(func() error {
 		var phase core.PodPhase
 		for event := range watcher.ResultChan() {
-			pod = event.Object.(*core.Pod)
+			pod, ok := event.Object.(*core.Pod)
+			if !ok {
+				// if event.Object will be not core.Pod, we expect that it was executed cancel to the context.Context.
+				// In this case, we should stop watch loop, so return instantly.
+				return nil
+			}
 			if ctx.Err() != nil && pod.Status.Phase == core.PodRunning {
 				return nil
 			}
