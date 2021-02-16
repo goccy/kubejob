@@ -2,7 +2,6 @@ package kubejob_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/goccy/kubejob"
@@ -467,12 +466,10 @@ func Test_RunnerWithCancel(t *testing.T) {
 		t.Fatalf("failed to build job: %+v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-
-	cancel()
-
 	if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor) error {
-		return fmt.Errorf("shouldn't call handler")
-	}); err != nil {
-		t.Fatalf("failed to run: %+v", err)
+		cancel()
+		return nil
+	}); err == nil {
+		t.Fatalf("expected error but got nil")
 	}
 }
