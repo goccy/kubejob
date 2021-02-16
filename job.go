@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	KubejobLabel   = "kubejob.io/id"
+	KubejobLabel = "kubejob.io/id"
 )
 
 var (
@@ -455,16 +455,16 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 	return nil
 }
 
-func (j *Job) cleanup() error {
+func (j *Job) cleanup(ctx context.Context) error {
 	j.logf("cleanup job %s", j.Name)
 	multierr := []string{}
-	if err := j.jobClient.Delete(j.Name, &metav1.DeleteOptions{
+	if err := j.jobClient.Delete(ctx, j.Name, metav1.DeleteOptions{
 		GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
 	}); err != nil {
 		multierr = append(multierr, xerrors.Errorf("failed to delete job %s: %w", j.Name, err).Error())
 	}
 	j.logf("search by %s", j.labelSelector())
-	podList, err := j.podClient.List(metav1.ListOptions{
+	podList, err := j.podClient.List(ctx, metav1.ListOptions{
 		LabelSelector: j.labelSelector(),
 	})
 	if err != nil {
@@ -480,7 +480,7 @@ func (j *Job) cleanup() error {
 	j.logf("%d pods found", len(podList.Items))
 	for _, pod := range podList.Items {
 		j.logf("delete pod: %s job-id: %s", pod.Name, pod.Labels[KubejobLabel])
-		if err := j.podClient.Delete(pod.Name, &metav1.DeleteOptions{
+		if err := j.podClient.Delete(ctx, pod.Name, metav1.DeleteOptions{
 			GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
 		}); err != nil {
 			multierr = append(multierr, xerrors.Errorf("failed to delete pod %s: %w", pod.Name, err).Error())
@@ -493,11 +493,11 @@ func (j *Job) cleanup() error {
 }
 
 func (j *Job) Run(ctx context.Context) (e error) {
-	if _, err := j.jobClient.Create(j.Job); err != nil {
+	if _, err := j.jobClient.Create(ctx, j.Job, metav1.CreateOptions{}); err != nil {
 		return xerrors.Errorf("failed to create job: %w", err)
 	}
 	defer func() {
-		if err := j.cleanup(); err != nil {
+		if err := j.cleanup(ctx); err != nil {
 			if e == nil {
 				e = err
 			} else {
@@ -544,7 +544,7 @@ func (j *Job) logf(format string, args ...interface{}) {
 }
 
 func (j *Job) wait(ctx context.Context) error {
-	watcher, err := j.podClient.Watch(metav1.ListOptions{
+	watcher, err := j.podClient.Watch(ctx, metav1.ListOptions{
 		LabelSelector: j.labelSelector(),
 		Watch:         true,
 	})
@@ -709,7 +709,7 @@ func (j *Job) logStreamContainer(ctx context.Context, pod *core.Pod, container c
 		VersionedParams(&core.PodLogOptions{
 			Follow:    true,
 			Container: container.Name,
-		}, scheme.ParameterCodec).Stream()
+		}, scheme.ParameterCodec).Stream(ctx)
 	if err != nil {
 		return xerrors.Errorf("failed to create log stream: %w", err)
 	}
