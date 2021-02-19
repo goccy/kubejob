@@ -292,7 +292,12 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 		w.Close()
 	}()
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		if streamErr != nil {
+			return buf.Bytes(), xerrors.Errorf("%s. failed to read buffer: %w", streamErr, err)
+		}
+		return buf.Bytes(), xerrors.Errorf("failed to read buffer: %w", err)
+	}
 	return buf.Bytes(), streamErr
 }
 
@@ -497,7 +502,9 @@ func (j *Job) Run(ctx context.Context) (e error) {
 		return xerrors.Errorf("failed to create job: %w", err)
 	}
 	defer func() {
-		if err := j.cleanup(ctx); err != nil {
+		// we wouldn't like to cancel cleanup process by cancelled context,
+		// so create new context and use it.
+		if err := j.cleanup(context.Background()); err != nil {
 			if e == nil {
 				e = err
 			} else {

@@ -23,6 +23,22 @@ func init() {
 	cfg = c
 }
 
+func Test_SimpleRunning(t *testing.T) {
+	job, err := kubejob.NewJobBuilder(cfg, "default").
+		SetImage("golang:1.15").
+		SetCommand([]string{"go", "version"}).
+		Build()
+	if err != nil {
+		t.Fatalf("%+v", err)
+	}
+	job.SetContainerLogger(func(cl *kubejob.ContainerLog) {
+		t.Log(cl.Log)
+	})
+	if err := job.Run(context.Background()); err != nil {
+		t.Fatalf("%+v", err)
+	}
+}
+
 func Test_Run(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
 		Spec: batchv1.JobSpec{
@@ -469,7 +485,7 @@ func Test_RunnerWithCancel(t *testing.T) {
 	if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor) error {
 		cancel()
 		return nil
-	}); err == nil {
-		t.Fatalf("expected error but got nil")
+	}); err != nil {
+		t.Fatalf("%+v", err)
 	}
 }
