@@ -469,7 +469,7 @@ func Test_RunnerWithCancel(t *testing.T) {
 	if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor) error {
 		cancel()
 		return nil
-	}); err == nil {
-		t.Fatalf("expected error but got nil")
+	}); err != nil {
+		t.Fatalf("%+v", err)
 	}
 }
