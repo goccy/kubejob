@@ -502,7 +502,9 @@ func (j *Job) Run(ctx context.Context) (e error) {
 		return xerrors.Errorf("failed to create job: %w", err)
 	}
 	defer func() {
-		if err := j.cleanup(ctx); err != nil {
+		// we wouldn't like to cancel cleanup process by cancelled context,
+		// so create new context and use it.
+		if err := j.cleanup(context.Background()); err != nil {
 			if e == nil {
 				e = err
 			} else {
