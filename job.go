@@ -292,7 +292,12 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 		w.Close()
 	}()
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		if streamErr != nil {
+			return buf.Bytes(), xerrors.Errorf("%s. failed to read buffer: %w", streamErr, err)
+		}
+		return buf.Bytes(), xerrors.Errorf("failed to read buffer: %w", err)
+	}
 	return buf.Bytes(), streamErr
 }
 
