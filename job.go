@@ -252,13 +252,14 @@ func (j *Job) DisableCommandLog() {
 }
 
 type JobExecutor struct {
-	Container core.Container
-	Pod       *core.Pod
-	command   []string
-	args      []string
-	job       *Job
-	isRunning bool
-	err       error
+	Container   core.Container
+	Pod         *core.Pod
+	command     []string
+	args        []string
+	job         *Job
+	isRunning   bool
+	isRunningMu sync.Mutex
+	err         error
 }
 
 func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
@@ -339,14 +340,26 @@ func (e *JobExecutor) Exec() ([]byte, error) {
 	return e.ExecOnly()
 }
 
+func (e *JobExecutor) setIsRunning(isRunning bool) {
+	e.isRunningMu.Lock()
+	defer e.isRunningMu.Unlock()
+	e.isRunning = isRunning
+}
+
+func (e *JobExecutor) IsRunning() bool {
+	e.isRunningMu.Lock()
+	defer e.isRunningMu.Unlock()
+	return e.isRunning
+}
+
 func (e *JobExecutor) ExecOnly() ([]byte, error) {
-	if e.isRunning {
+	if e.IsRunning() {
 		return nil, xerrors.Errorf("failed to exec: job is already running")
 	}
 	if !e.job.disabledCommandLog {
 		fmt.Println(strings.Join(append(e.command, e.args...), " "))
 	}
-	e.isRunning = true
+	e.setIsRunning(true)
 	out, err := e.execWithRetry(append(e.command, e.args...))
 	e.err = err
 	if err != nil {
@@ -356,13 +369,13 @@ func (e *JobExecutor) ExecOnly() ([]byte, error) {
 }
 
 func (e *JobExecutor) ExecAsync() error {
-	if e.isRunning {
+	if e.IsRunning() {
 		return xerrors.Errorf("failed to exec: job is already running")
 	}
 	if !e.job.disabledCommandLog {
 		fmt.Println(strings.Join(append(e.command, e.args...), " "))
 	}
-	e.isRunning = true
+	e.setIsRunning(true)
 	go func() {
 		_, err := e.execWithRetry(append(e.command, e.args...))
 		e.err = err
@@ -375,7 +388,7 @@ func (e *JobExecutor) ExecAsync() error {
 
 func (e *JobExecutor) Stop() error {
 	defer func() {
-		e.isRunning = false
+		e.setIsRunning(false)
 	}()
 	var status int
 	if e.err != nil {
@@ -438,7 +451,7 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 			if executor.err != nil {
 				existsErrContainer = true
 			}
-			if executor.isRunning {
+			if executor.IsRunning() {
 				if err := executor.Stop(); err != nil {
 					log.Printf("failed to stop: %+v", err)
 					forceStop = true
