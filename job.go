@@ -348,7 +348,6 @@ func (e *JobExecutor) ExecOnly() ([]byte, error) {
 	}
 	e.isRunning = true
 	out, err := e.execWithRetry(append(e.command, e.args...))
-	e.isRunning = false
 	e.err = err
 	if err != nil {
 		return out, xerrors.Errorf("%s: %w", err.Error(), &FailedJob{Pod: e.Pod})
@@ -366,7 +365,6 @@ func (e *JobExecutor) ExecAsync() error {
 	e.isRunning = true
 	go func() {
 		_, err := e.execWithRetry(append(e.command, e.args...))
-		e.isRunning = false
 		e.err = err
 		if err := e.Stop(); err != nil {
 			e.job.logf("[WARN] failed to stop async executor: %s", err)
@@ -376,6 +374,9 @@ func (e *JobExecutor) ExecAsync() error {
 }
 
 func (e *JobExecutor) Stop() error {
+	defer func() {
+		e.isRunning = false
+	}()
 	var status int
 	if e.err != nil {
 		status = 1
