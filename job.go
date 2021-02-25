@@ -331,28 +331,29 @@ func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
 }
 
 func (e *JobExecutor) Exec() ([]byte, error) {
+	defer func() {
+		if err := e.Stop(); err != nil {
+			e.job.logf("[WARN]: %s", err)
+		}
+	}()
+	return e.ExecOnly()
+}
+
+func (e *JobExecutor) ExecOnly() ([]byte, error) {
 	if e.isRunning {
 		return nil, xerrors.Errorf("failed to exec: job is already running")
 	}
 	if !e.job.disabledCommandLog {
 		fmt.Println(strings.Join(append(e.command, e.args...), " "))
 	}
-	var (
-		status  int
-		errTest error
-	)
 	e.isRunning = true
 	out, err := e.execWithRetry(append(e.command, e.args...))
 	e.isRunning = false
 	e.err = err
 	if err != nil {
-		status = 1
-		errTest = xerrors.Errorf("%s: %w", err.Error(), &FailedJob{Pod: e.Pod})
+		return out, xerrors.Errorf("%s: %w", err.Error(), &FailedJob{Pod: e.Pod})
 	}
-	if _, err := e.execWithRetry([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
-		e.job.logf("[WARN] failed to send test status: %s", err)
-	}
-	return out, errTest
+	return out, nil
 }
 
 func (e *JobExecutor) ExecAsync() error {
@@ -367,20 +368,20 @@ func (e *JobExecutor) ExecAsync() error {
 		_, err := e.execWithRetry(append(e.command, e.args...))
 		e.isRunning = false
 		e.err = err
-		var status int
-		if err != nil {
-			status = 1
-		}
-		if _, err := e.execWithRetry([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
-			e.job.logf("[WARN] failed to send status in async executor: %s", err)
+		if err := e.Stop(); err != nil {
+			e.job.logf("[WARN] failed to stop async executor: %s", err)
 		}
 	}()
 	return nil
 }
 
 func (e *JobExecutor) Stop() error {
-	if _, err := e.execWithRetry([]string{"echo", "0", ">", "/tmp/kubejob-status"}); err != nil {
-		return xerrors.Errorf("failed to force stop process: %w", err)
+	var status int
+	if e.err != nil {
+		status = 1
+	}
+	if _, err := e.execWithRetry([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
+		return xerrors.Errorf("failed to stop process: %w", err)
 	}
 	return nil
 }
