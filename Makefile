@@ -9,7 +9,7 @@ $(BIN):
 	@mkdir -p $(BIN)
 
 KIND := $(BIN)/kind
-KIND_VERSION := v0.8.1
+KIND_VERSION := v0.11.0
 $(KIND): | $(BIN)
 	@curl -sSLo $(KIND) "https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-$(UNAME_OS)-amd64"
 	@chmod +x $(KIND)
@@ -31,7 +31,18 @@ delete-cluster: $(KIND)
 
 deploy: test-cluster
 	kubectl apply -f testdata/config/manifest.yaml
-	kubectl apply -f https://docs.projectcalico.org/v3.8/manifests/calico.yaml
+
+wait:
+	{ \
+	set -e ;\
+	while true; do \
+		POD_NAME=$$(KUBECONFIG=$(KUBECONFIG) kubectl get pod | grep Running | grep kubejob-deployment | awk '{print $$1}'); \
+		if [ "$$POD_NAME" != "" ]; then \
+			exit 0; \
+		fi; \
+		sleep 1; \
+	done; \
+	}
 
 test:
 	{ \

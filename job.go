@@ -322,7 +322,13 @@ func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
 				break
 			}
 			// cannot connect to Pod. retry....
-			e.job.logf("[WARN] %s. retry: %d/%d", err, retryCount, ExecRetryCount)
+			e.job.logf(
+				"[WARN] %s at %s. retry: %d/%d",
+				err,
+				e.Container.Name,
+				retryCount,
+				ExecRetryCount,
+			)
 			retryCount++
 			continue
 		}
@@ -350,6 +356,21 @@ func (e *JobExecutor) IsRunning() bool {
 	e.isRunningMu.Lock()
 	defer e.isRunningMu.Unlock()
 	return e.isRunning
+}
+
+func (e *JobExecutor) ExecPrepareCommand(cmd []string) ([]byte, error) {
+	if e.IsRunning() {
+		return nil, xerrors.Errorf("failed to exec: job is already running")
+	}
+	if !e.job.disabledCommandLog {
+		fmt.Println(strings.Join(cmd, " "))
+	}
+
+	out, err := e.execWithRetry(cmd)
+	if err != nil {
+		return out, xerrors.Errorf("%s: %w", err.Error(), &FailedJob{Pod: e.Pod})
+	}
+	return out, nil
 }
 
 func (e *JobExecutor) ExecOnly() ([]byte, error) {
@@ -412,6 +433,23 @@ exit $(cat /tmp/kubejob-status)
 `
 
 func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler) error {
+	ctx, cancel := context.WithCancel(ctx)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- j.runWithExecutionHandler(ctx, cancel, handler)
+	}()
+	select {
+	case <-ctx.Done():
+		// stop runWithExecutionHandler safely.
+		cancel()
+		return <-errCh
+	case err := <-errCh:
+		return err
+	}
+	return nil
+}
+
+func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), handler JobExecutionHandler) error {
 	executorMap := map[string]*JobExecutor{}
 	for idx := range j.Job.Spec.Template.Spec.Containers {
 		container := j.Job.Spec.Template.Spec.Containers[idx]
@@ -429,7 +467,6 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 	j.DisableCommandLog()
 	existsErrContainer := false
 	var callbackPod *core.Pod
-	ctx, cancel := context.WithCancel(ctx)
 	j.podRunningCallback = func(pod *core.Pod) error {
 		callbackPod = pod
 		forceStop := false
@@ -459,7 +496,7 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 			}
 		}
 		if forceStop {
-			cancel()
+			cancelFn()
 		}
 		return nil
 	}
@@ -601,7 +638,7 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 				// In this case, we should stop watch loop, so return instantly.
 				return nil
 			}
-			if ctx.Err() != nil && pod.Status.Phase == core.PodRunning {
+			if ctx.Err() != nil && pod.Status.Phase != core.PodPending {
 				return nil
 			}
 			if pod.Status.Phase == phase {
