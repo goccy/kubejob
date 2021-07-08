@@ -322,7 +322,13 @@ func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
 				break
 			}
 			// cannot connect to Pod. retry....
-			e.job.logf("[WARN] %s. retry: %d/%d", err, retryCount, ExecRetryCount)
+			e.job.logf(
+				"[WARN] %s at %s. retry: %d/%d",
+				err,
+				e.Container.Name,
+				retryCount,
+				ExecRetryCount,
+			)
 			retryCount++
 			continue
 		}
