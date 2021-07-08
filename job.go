@@ -352,6 +352,21 @@ func (e *JobExecutor) IsRunning() bool {
 	return e.isRunning
 }
 
+func (e *JobExecutor) ExecPrepareCommand(cmd []string) ([]byte, error) {
+	if e.IsRunning() {
+		return nil, xerrors.Errorf("failed to exec: job is already running")
+	}
+	if !e.job.disabledCommandLog {
+		fmt.Println(strings.Join(cmd, " "))
+	}
+
+	out, err := e.execWithRetry(cmd)
+	if err != nil {
+		return out, xerrors.Errorf("%s: %w", err.Error(), &FailedJob{Pod: e.Pod})
+	}
+	return out, nil
+}
+
 func (e *JobExecutor) ExecOnly() ([]byte, error) {
 	if e.IsRunning() {
 		return nil, xerrors.Errorf("failed to exec: job is already running")
