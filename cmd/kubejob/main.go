@@ -118,5 +118,6 @@ func main() {
 	}
 	if err := _main(args, opt); err != nil {
 		fmt.Printf("%+v", err)
+		os.Exit(1)
 	}
 }
