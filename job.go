@@ -481,22 +481,24 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 				forceStop = true
 			}
 		}
-		if err := handler(executors); err != nil {
-			return xerrors.Errorf("failed to handle executors: %w", err)
-		}
-		for _, executor := range executors {
-			if executor.err != nil {
-				existsErrContainer = true
-			}
-			if executor.IsRunning() {
-				if err := executor.Stop(); err != nil {
-					log.Printf("failed to stop: %+v", err)
-					forceStop = true
+		defer func() {
+			for _, executor := range executors {
+				if executor.err != nil {
+					existsErrContainer = true
+				}
+				if executor.IsRunning() {
+					if err := executor.Stop(); err != nil {
+						log.Printf("failed to stop: %+v", err)
+						forceStop = true
+					}
 				}
 			}
-		}
-		if forceStop {
-			cancelFn()
+			if forceStop {
+				cancelFn()
+			}
+		}()
+		if err := handler(executors); err != nil {
+			return xerrors.Errorf("failed to handle executors: %w", err)
 		}
 		return nil
 	}

@@ -1,5 +1,9 @@
 name: test
-on: [push,pull_request]
+on:
+  push:
+    branches:
+      - master
+  pull_request:
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -15,6 +19,7 @@ jobs:
     - name: Run test
       run: |
         timeout 600 make test
-    - name: Report coverage
-      run: |
-        bash <(curl -s https://codecov.io/bash)
+    - uses: codecov/codecov-action@v2
+      with:
+        fail_ci_if_error: true
+        verbose: true
