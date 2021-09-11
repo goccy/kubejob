@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -265,19 +264,28 @@ type JobExecutor struct {
 
 // If a command like `sh -c "x; y; z" is passed as a cmd,
 // there is no quote for `x; y; z`, so if you wrap the command with `sh -c`, it will occur unexpectedly behavior.
-// To prevent that, explicitly add quote to that command.
-func (e *JobExecutor) normalizeCmd(cmd []string) []string {
+// To prevent that, executes using variables.
+func (e *JobExecutor) normalizeCmd(cmd []string) string {
 	const whiteSpace = " "
+
 	normalizedCmd := make([]string, 0, len(cmd))
-	for _, c := range cmd {
+	vars := []string{}
+	for idx, c := range cmd {
 		c = strings.Trim(c, whiteSpace)
 		if strings.Contains(c, whiteSpace) {
-			normalizedCmd = append(normalizedCmd, strconv.Quote(c))
+			// contains multiple command
+			vars = append(vars, fmt.Sprintf("VAR%d=$(cat <<-EOS\n%s\nEOS\n)", idx, c))
+			normalizedCmd = append(normalizedCmd, fmt.Sprintf(`"$VAR%d"`, idx))
 		} else {
 			normalizedCmd = append(normalizedCmd, c)
 		}
 	}
-	return normalizedCmd
+	cmdText := strings.Join(normalizedCmd, " ")
+	if len(vars) == 0 {
+		// simple command
+		return cmdText
+	}
+	return fmt.Sprintf("%s; %s", strings.Join(vars, ";"), cmdText)
 }
 
 func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
@@ -289,7 +297,7 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 		SubResource("exec").
 		VersionedParams(&core.PodExecOptions{
 			Container: e.Container.Name,
-			Command:   []string{"sh", "-c", strings.Join(e.normalizeCmd(cmd), " ")},
+			Command:   []string{"sh", "-c", e.normalizeCmd(cmd)},
 			Stdin:     false,
 			Stdout:    true,
 			Stderr:    true,
