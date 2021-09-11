@@ -267,9 +267,11 @@ type JobExecutor struct {
 // there is no quote for `x; y; z`, so if you wrap the command with `sh -c`, it will occur unexpectedly behavior.
 // To prevent that, explicitly add quote to that command.
 func (e *JobExecutor) normalizeCmd(cmd []string) []string {
+	const whiteSpace = " "
 	normalizedCmd := make([]string, 0, len(cmd))
 	for _, c := range cmd {
-		if strings.Contains(c, " ") {
+		c = strings.Trim(c, whiteSpace)
+		if strings.Contains(c, whiteSpace) {
 			normalizedCmd = append(normalizedCmd, strconv.Quote(c))
 		} else {
 			normalizedCmd = append(normalizedCmd, c)
