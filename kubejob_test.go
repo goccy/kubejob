@@ -176,7 +176,10 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 								Name:    "test",
 								Image:   "golang:1.15",
 								Command: []string{"sh", "-c"},
-								Args:    []string{"set -eu; echo $TEST"},
+								Args: []string{
+									`set -eu
+                                     echo $TEST`,
+								},
 								Env: []apiv1.EnvVar{
 									{
 										Name:  "TEST",
