@@ -56,3 +56,16 @@ test:
 		sleep 1; \
 	done; \
 	}
+
+test-run:
+	{ \
+	set -e ;\
+	while true; do \
+		POD_NAME=$$(KUBECONFIG=$(KUBECONFIG) kubectl get pod | grep Running | grep kubejob-deployment | awk '{print $$1}'); \
+		if [ "$$POD_NAME" != "" ]; then \
+			kubectl exec -it $$POD_NAME -- go test -v -coverprofile=coverage.out ./ -count=1 -run $(TEST); \
+			exit $$?; \
+		fi; \
+		sleep 1; \
+	done; \
+	}
