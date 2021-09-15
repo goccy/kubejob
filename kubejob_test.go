@@ -595,6 +595,8 @@ func Test_Copy(t *testing.T) {
 									`
 mkdir -p /tmp/artifacts
 echo -n "hello" > /tmp/artifacts/artifact.txt
+touch /tmp/symfile
+ln -s /tmp/symfile /tmp/artifacts/symfile
 `,
 								},
 							},
@@ -643,6 +645,13 @@ echo -n "hello" > /tmp/artifacts/artifact.txt
 		}
 		file := filepath.Join(artifactsDir, "artifact.txt")
 		if err := os.WriteFile(file, []byte("hello"), 0666); err != nil {
+			t.Fatal(err)
+		}
+		symfile := filepath.Join(dir, "symfile")
+		if err := os.WriteFile(symfile, []byte("symfile"), 0666); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(symfile, filepath.Join(artifactsDir, "symfile")); err != nil {
 			t.Fatal(err)
 		}
 
