@@ -211,6 +211,61 @@ type Job struct {
 	verboseLog               bool
 	config                   *rest.Config
 	podRunningCallback       func(*core.Pod) error
+	preInit                  *preInit
+}
+
+type preInit struct {
+	exec      *JobExecutor
+	container core.Container
+	callback  func(*JobExecutor) error
+	done      bool
+}
+
+func (i *preInit) needsToRun(status core.PodStatus) bool {
+	if i == nil {
+		return false
+	}
+	if i.done {
+		return false
+	}
+	if status.Phase != core.PodPending {
+		return false
+	}
+	for _, status := range status.InitContainerStatuses {
+		if status.Name != i.container.Name {
+			continue
+		}
+		if status.State.Running != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (i *preInit) run(pod *core.Pod) error {
+	if i.done {
+		return nil
+	}
+	i.exec.Pod = pod
+	logger := i.exec.job.containerLogger
+	i.exec.job.containerLogger = func(log *ContainerLog) {
+		if log.Container.Name == i.container.Name {
+			return
+		}
+		if logger != nil {
+			logger(log)
+		}
+	}
+	if i.callback != nil {
+		if err := i.callback(i.exec); err != nil {
+			return xerrors.Errorf("failed to run preinit: %w", err)
+		}
+	}
+	i.done = true
+	if err := i.exec.Stop(); err != nil {
+		return xerrors.Errorf("failed to stop preinit container: %w", err)
+	}
+	return nil
 }
 
 type ContainerLogger func(*ContainerLog)
@@ -258,6 +313,7 @@ type JobExecutor struct {
 	args        []string
 	job         *Job
 	isRunning   bool
+	stopped     bool
 	isRunningMu sync.Mutex
 	err         error
 }
@@ -434,6 +490,9 @@ func (e *JobExecutor) ExecAsync() error {
 }
 
 func (e *JobExecutor) Stop() error {
+	if e.stopped {
+		return nil
+	}
 	defer func() {
 		e.setIsRunning(false)
 	}()
@@ -444,6 +503,7 @@ func (e *JobExecutor) Stop() error {
 	if _, err := e.execWithRetry([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
 		return xerrors.Errorf("failed to stop process: %w", err)
 	}
+	e.stopped = true
 	return nil
 }
 
@@ -457,6 +517,28 @@ done
 
 exit $(cat /tmp/kubejob-status)
 `
+
+func (j *Job) jobTemplateCommandContainer(c core.Container) core.Container {
+	copied := c.DeepCopy()
+	copied.Command = []string{"sh", "-c"}
+	copied.Args = []string{jobCommandTemplate}
+	return *copied
+}
+
+// PreInit can define the process you want to execute before the process of init container specified at the time of starting Job.
+// It is mainly intended to be used when you use `(*JobExecutor).CopyToFile` to copy an arbitrary file to pod before init processing.
+func (j *Job) PreInit(c core.Container, cb func(exec *JobExecutor) error) {
+	j.preInit = &preInit{
+		container: j.jobTemplateCommandContainer(c),
+		callback:  cb,
+		exec: &JobExecutor{
+			Container: c,
+			command:   c.Command,
+			args:      c.Args,
+			job:       j,
+		},
+	}
+}
 
 func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -578,6 +660,10 @@ func (j *Job) cleanup(ctx context.Context) error {
 }
 
 func (j *Job) Run(ctx context.Context) (e error) {
+	if j.preInit != nil {
+		initContainers := j.Job.Spec.Template.Spec.InitContainers
+		j.Job.Spec.Template.Spec.InitContainers = append([]core.Container{j.preInit.container}, initContainers...)
+	}
 	if _, err := j.jobClient.Create(ctx, j.Job, metav1.CreateOptions{}); err != nil {
 		return xerrors.Errorf("failed to create job: %w", err)
 	}
@@ -668,6 +754,11 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 			}
 			if ctx.Err() != nil && pod.Status.Phase != core.PodPending {
 				return nil
+			}
+			if j.preInit.needsToRun(pod.Status) {
+				if err := j.preInit.run(pod); err != nil {
+					return xerrors.Errorf("failed to run preinit: %w", err)
+				}
 			}
 			if pod.Status.Phase == phase {
 				continue
