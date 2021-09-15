@@ -2,6 +2,9 @@ package kubejob_test
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/goccy/kubejob"
@@ -315,7 +318,7 @@ func Test_RunnerWithInitContainers(t *testing.T) {
 					InitContainers: []apiv1.Container{
 						{
 							Name:    "init-touch",
-							Image:   "golang:1.15",
+							Image:   "golang:1.16",
 							Command: []string{"touch", "/tmp/mnt/hello.txt"},
 							VolumeMounts: []apiv1.VolumeMount{
 								{
@@ -569,4 +572,128 @@ func Test_RunnerWithCancel(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("%+v", err)
 	}
+}
+
+func Test_Copy(t *testing.T) {
+	t.Run("copyFromPod", func(t *testing.T) {
+		dir, err := os.MkdirTemp("", "kubejob")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(dir)
+
+		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			Spec: batchv1.JobSpec{
+				Template: apiv1.PodTemplateSpec{
+					Spec: apiv1.PodSpec{
+						Containers: []apiv1.Container{
+							{
+								Name:    "test",
+								Image:   "golang:1.17",
+								Command: []string{"sh", "-c"},
+								Args: []string{
+									`
+mkdir -p /tmp/artifacts
+echo -n "hello" > /tmp/artifacts/artifact.txt
+touch /tmp/symfile
+ln -s /tmp/symfile /tmp/artifacts/symfile
+`,
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to build job: %+v", err)
+		}
+		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+			if len(executors) != 1 {
+				return fmt.Errorf("invalid executor num. expected 1 but got %d", len(executors))
+			}
+			if _, err := executors[0].Exec(); err != nil {
+				return fmt.Errorf("failed to execute command: %w", err)
+			}
+			if err := executors[0].CopyFromPod(
+				filepath.Join("/", "tmp", "artifacts"),
+				filepath.Join(dir, "artifacts"),
+			); err != nil {
+				return fmt.Errorf("failed to copy: %w", err)
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("%+v", err)
+		}
+		content, err := os.ReadFile(filepath.Join(dir, "artifacts", "artifact.txt"))
+		if err != nil {
+			t.Fatalf("failed to open file: %s", err)
+		}
+		if string(content) != "hello" {
+			t.Fatalf("invalid content: expected hello but got %s", string(content))
+		}
+	})
+	t.Run("copyToPod", func(t *testing.T) {
+		dir, err := os.MkdirTemp("", "kubejob")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(dir)
+		artifactsDir := filepath.Join(filepath.Join(dir, "artifacts"))
+		if err := os.MkdirAll(artifactsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		file := filepath.Join(artifactsDir, "artifact.txt")
+		if err := os.WriteFile(file, []byte("hello"), 0666); err != nil {
+			t.Fatal(err)
+		}
+		symfile := filepath.Join(dir, "symfile")
+		if err := os.WriteFile(symfile, []byte("symfile"), 0666); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(symfile, filepath.Join(artifactsDir, "symfile")); err != nil {
+			t.Fatal(err)
+		}
+
+		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			Spec: batchv1.JobSpec{
+				Template: apiv1.PodTemplateSpec{
+					Spec: apiv1.PodSpec{
+						Containers: []apiv1.Container{
+							{
+								Name:    "test",
+								Image:   "golang:1.17",
+								Command: []string{"cat"},
+								Args:    []string{filepath.Join("/", "tmp", "artifacts", "artifact.txt")},
+							},
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to build job: %+v", err)
+		}
+		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+			if len(executors) != 1 {
+				return fmt.Errorf("invalid executor num. expected 1 but got %d", len(executors))
+			}
+			if err := executors[0].CopyToPod(
+				artifactsDir,
+				filepath.Join("/", "tmp"),
+			); err != nil {
+				return fmt.Errorf("failed to copy: %w", err)
+			}
+			out, err := executors[0].Exec()
+			if err != nil {
+				return fmt.Errorf("failed to execute command: %w", err)
+			}
+			if string(out) != "hello" {
+				t.Fatalf("invalid content: expected hello but got %s", string(out))
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("%+v", err)
+		}
+	})
 }
