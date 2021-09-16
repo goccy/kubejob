@@ -26,6 +26,30 @@ const (
 	DefaultContainerName = "kubejob"
 )
 
+type LogLevel int
+
+const (
+	LogLevelNone LogLevel = iota
+	LogLevelError
+	LogLevelWarn
+	LogLevelInfo
+	LogLevelDebug
+)
+
+func (l LogLevel) String() string {
+	switch l {
+	case LogLevelNone:
+		return "none"
+	case LogLevelWarn:
+		return "warn"
+	case LogLevelInfo:
+		return "info"
+	case LogLevelDebug:
+		return "debug"
+	}
+	return ""
+}
+
 var (
 	ExecRetryCount = 8
 )
@@ -42,7 +66,7 @@ type Job struct {
 	disabledInitCommandLog   bool
 	disabledContainerLog     bool
 	disabledCommandLog       bool
-	verboseLog               bool
+	logLevel                 LogLevel
 	config                   *rest.Config
 	podRunningCallback       func(*corev1.Pod) error
 	preInit                  *preInit
@@ -58,8 +82,8 @@ type ContainerLog struct {
 	IsFinished bool
 }
 
-func (j *Job) SetVerboseLog(verboseLog bool) {
-	j.verboseLog = verboseLog
+func (j *Job) SetLogLevel(level LogLevel) {
+	j.logLevel = level
 }
 
 func (j *Job) SetContainerLogger(logger ContainerLogger) {
@@ -87,14 +111,14 @@ func (j *Job) DisableCommandLog() {
 }
 
 func (j *Job) cleanup(ctx context.Context) error {
-	j.logf("cleanup job %s", j.Name)
+	j.logDebug("cleanup job %s", j.Name)
 	errs := []error{}
 	if err := j.jobClient.Delete(ctx, j.Name, metav1.DeleteOptions{
 		GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
 	}); err != nil {
 		errs = append(errs, fmt.Errorf("failed to delete job: %w", err))
 	}
-	j.logf("search by %s", j.labelSelector())
+	j.logDebug("search by %s", j.labelSelector())
 	podList, err := j.podClient.List(ctx, metav1.ListOptions{
 		LabelSelector: j.labelSelector(),
 	})
@@ -102,15 +126,15 @@ func (j *Job) cleanup(ctx context.Context) error {
 		errs = append(errs, fmt.Errorf("failed to list pod: %w", err))
 	}
 	if podList == nil || len(podList.Items) == 0 {
-		j.logf("[WARN] could not find pod to remove")
+		j.logWarn("could not find pod to remove")
 		if len(errs) > 0 {
 			return errCleanup(j.Name, errs)
 		}
 		return nil
 	}
-	j.logf("%d pods found", len(podList.Items))
+	j.logDebug("%d pods found", len(podList.Items))
 	for _, pod := range podList.Items {
-		j.logf("delete pod: %s job-id: %s", pod.Name, pod.Labels[SelectorLabel])
+		j.logDebug("delete pod: %s job-id: %s", pod.Name, pod.Labels[SelectorLabel])
 		if err := j.podClient.Delete(ctx, pod.Name, metav1.DeleteOptions{
 			GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
 		}); err != nil {
@@ -167,10 +191,21 @@ func (j *Job) containerLog(log *ContainerLog) {
 	}
 }
 
-func (j *Job) logf(format string, args ...interface{}) {
-	if !j.verboseLog {
+func (j *Job) logWarn(format string, args ...interface{}) {
+	if j.logLevel < LogLevelWarn {
 		return
 	}
+	j.logf(fmt.Sprintf("[WARN] %s", format), args...)
+}
+
+func (j *Job) logDebug(format string, args ...interface{}) {
+	if j.logLevel < LogLevelDebug {
+		return
+	}
+	j.logf(fmt.Sprintf("[DEBUG] %s", format), args...)
+}
+
+func (j *Job) logf(format string, args ...interface{}) {
 	if format == "" {
 		return
 	}

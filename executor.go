@@ -113,8 +113,8 @@ func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
 				}
 			}
 			// cannot connect to Pod. retry....
-			e.job.logf(
-				"[WARN] %s at %s. retry: %d/%d",
+			e.job.logDebug(
+				"%s at %s. retry: %d/%d",
 				err,
 				e.Container.Name,
 				retryCount,
@@ -131,7 +131,7 @@ func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
 func (e *JobExecutor) Exec() ([]byte, error) {
 	defer func() {
 		if err := e.Stop(); err != nil {
-			e.job.logf("[WARN] %s", err)
+			e.job.logWarn("%s", err)
 		}
 	}()
 	return e.ExecOnly()
@@ -192,7 +192,7 @@ func (e *JobExecutor) ExecAsync() error {
 		_, err := e.execWithRetry(append(e.command, e.args...))
 		e.err = err
 		if err := e.Stop(); err != nil {
-			e.job.logf("[WARN] failed to stop async executor: %s", err)
+			e.job.logWarn("failed to stop async executor: %s", err)
 		}
 	}()
 	return nil
@@ -274,7 +274,7 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 				}
 				if executor.IsRunning() {
 					if err := executor.Stop(); err != nil {
-						j.logf("[WARN] failed to stop %s", err)
+						j.logWarn("failed to stop %s", err)
 						forceStop = true
 					}
 				}

@@ -92,7 +92,7 @@ func Test_RunWithVerboseLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to build job: %+v", err)
 	}
-	job.SetVerboseLog(true)
+	job.SetLogLevel(kubejob.LogLevelDebug)
 	if err := job.Run(context.Background()); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
@@ -120,7 +120,7 @@ func Test_CaptureVerboseLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to build job: %+v", err)
 	}
-	job.SetVerboseLog(true)
+	job.SetLogLevel(kubejob.LogLevelDebug)
 	logs := []string{}
 	job.SetLogger(func(log string) {
 		logs = append(logs, log)
@@ -302,7 +302,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to build job: %+v", err)
 		}
-		job.SetVerboseLog(true)
+		job.SetLogLevel(kubejob.LogLevelDebug)
 		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
 			for _, exec := range executors {
 				out, err := exec.ExecWithPodNotFoundError()
