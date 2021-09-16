@@ -2,16 +2,21 @@ package kubejob_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/goccy/kubejob"
-	"golang.org/x/xerrors"
 	batchv1 "k8s.io/api/batch/v1"
 	apiv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
+)
+
+const (
+	goImageName = "golang:1.17"
 )
 
 var (
@@ -28,7 +33,7 @@ func init() {
 
 func Test_SimpleRunning(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").
-		SetImage("golang:1.15").
+		SetImage(goImageName).
 		SetCommand([]string{"go", "version"}).
 		Build()
 	if err != nil {
@@ -44,13 +49,16 @@ func Test_SimpleRunning(t *testing.T) {
 
 func Test_Run(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{
 						{
 							Name:    "test",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"echo", "hello"},
 						},
 					},
@@ -68,13 +76,16 @@ func Test_Run(t *testing.T) {
 
 func Test_RunWithVerboseLog(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{
 						{
 							Name:    "test",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"echo", "hello"},
 						},
 					},
@@ -82,10 +93,10 @@ func Test_RunWithVerboseLog(t *testing.T) {
 			},
 		},
 	})
-	job.SetVerboseLog(true)
 	if err != nil {
 		t.Fatalf("failed to build job: %+v", err)
 	}
+	job.SetLogLevel(kubejob.LogLevelDebug)
 	if err := job.Run(context.Background()); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
@@ -93,13 +104,16 @@ func Test_RunWithVerboseLog(t *testing.T) {
 
 func Test_CaptureVerboseLog(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{
 						{
 							Name:    "test",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"echo", "hello"},
 						},
 					},
@@ -107,14 +121,14 @@ func Test_CaptureVerboseLog(t *testing.T) {
 			},
 		},
 	})
-	job.SetVerboseLog(true)
+	if err != nil {
+		t.Fatalf("failed to build job: %+v", err)
+	}
+	job.SetLogLevel(kubejob.LogLevelDebug)
 	logs := []string{}
 	job.SetLogger(func(log string) {
 		logs = append(logs, log)
 	})
-	if err != nil {
-		t.Fatalf("failed to build job: %+v", err)
-	}
 	if err := job.Run(context.Background()); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
@@ -125,13 +139,16 @@ func Test_CaptureVerboseLog(t *testing.T) {
 
 func Test_RunWithContainerLogger(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{
 						{
 							Name:    "test",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"echo", "hello"},
 						},
 					},
@@ -139,6 +156,10 @@ func Test_RunWithContainerLogger(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("failed to build job: %+v", err)
+	}
+
 	var (
 		callbacked      bool
 		containerLogErr error
@@ -146,17 +167,14 @@ func Test_RunWithContainerLogger(t *testing.T) {
 	job.SetContainerLogger(func(log *kubejob.ContainerLog) {
 		callbacked = true
 		if log.Pod == nil {
-			containerLogErr = xerrors.Errorf("could not find ContainerLog.Pod")
+			containerLogErr = fmt.Errorf("could not find ContainerLog.Pod")
 			return
 		}
 		if log.Container.Name != "test" {
-			containerLogErr = xerrors.Errorf("could not find ContainerLog.Container %s", log.Container.Name)
+			containerLogErr = fmt.Errorf("could not find ContainerLog.Container %s", log.Container.Name)
 			return
 		}
 	})
-	if err != nil {
-		t.Fatalf("failed to build job: %+v", err)
-	}
 	if err := job.Run(context.Background()); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
@@ -171,13 +189,16 @@ func Test_RunWithContainerLogger(t *testing.T) {
 func Test_RunnerWithExecutionHandler(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
 						Containers: []apiv1.Container{
 							{
 								Name:    "test",
-								Image:   "golang:1.15",
+								Image:   goImageName,
 								Command: []string{"sh", "-c"},
 								Args: []string{
 									`set -eu
@@ -215,13 +236,16 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 	})
 	t.Run("failure", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
 						Containers: []apiv1.Container{
 							{
 								Name:    "test",
-								Image:   "golang:1.15",
+								Image:   goImageName,
 								Command: []string{"cat", "fuga"},
 							},
 						},
@@ -239,7 +263,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 					t.Fatal("expect error")
 				}
 				var failedJob *kubejob.FailedJob
-				if xerrors.As(err, &failedJob) {
+				if errors.As(err, &failedJob) {
 					for _, container := range failedJob.FailedContainers() {
 						if container.Name != "test" {
 							t.Fatalf("cannot get valid container: %s", container.Name)
@@ -262,13 +286,16 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 		defer reset()
 
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
 						Containers: []apiv1.Container{
 							{
 								Name:    "test",
-								Image:   "golang:1.15",
+								Image:   goImageName,
 								Command: []string{"echo", "$TEST"},
 							},
 						},
@@ -279,7 +306,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to build job: %+v", err)
 		}
-		job.SetVerboseLog(true)
+		job.SetLogLevel(kubejob.LogLevelDebug)
 		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
 			for _, exec := range executors {
 				out, err := exec.ExecWithPodNotFoundError()
@@ -287,7 +314,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 					t.Fatal("expect error")
 				}
 				var failedJob *kubejob.FailedJob
-				if xerrors.As(err, &failedJob) {
+				if errors.As(err, &failedJob) {
 					for _, container := range failedJob.FailedContainers() {
 						if container.Name != "test" {
 							t.Fatalf("cannot get valid container: %s", container.Name)
@@ -296,7 +323,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 				} else {
 					t.Fatal("cannot get FailedJob")
 				}
-				if err.Error() == "failed to job" {
+				if err.Error() == "job: failed to job" {
 					t.Fatal("expect extra error message. but got empty")
 				}
 				if string(out) != "" {
@@ -312,13 +339,16 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 
 func Test_RunnerWithInitContainers(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
 					InitContainers: []apiv1.Container{
 						{
 							Name:    "init-touch",
-							Image:   "golang:1.16",
+							Image:   goImageName,
 							Command: []string{"touch", "/tmp/mnt/hello.txt"},
 							VolumeMounts: []apiv1.VolumeMount{
 								{
@@ -331,7 +361,7 @@ func Test_RunnerWithInitContainers(t *testing.T) {
 					Containers: []apiv1.Container{
 						{
 							Name:    "confirm",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"ls", "/tmp/mnt/hello.txt"},
 							VolumeMounts: []apiv1.VolumeMount{
 								{
@@ -374,13 +404,16 @@ func Test_RunnerWithInitContainers(t *testing.T) {
 
 func Test_RunnerWithPreInit(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
 					InitContainers: []apiv1.Container{
 						{
 							Name:    "after-preinit",
-							Image:   "golang:1.17",
+							Image:   goImageName,
 							Command: []string{"cat", "/tmp/mnt/hello.txt"},
 							VolumeMounts: []apiv1.VolumeMount{
 								{
@@ -393,7 +426,7 @@ func Test_RunnerWithPreInit(t *testing.T) {
 					Containers: []apiv1.Container{
 						{
 							Name:    "after-init",
-							Image:   "golang:1.17",
+							Image:   goImageName,
 							Command: []string{"cat", "/tmp/mnt/hello.txt"},
 							VolumeMounts: []apiv1.VolumeMount{
 								{
@@ -420,7 +453,7 @@ func Test_RunnerWithPreInit(t *testing.T) {
 	}
 	job.PreInit(apiv1.Container{
 		Name:    "preinit",
-		Image:   "golang:1.17",
+		Image:   goImageName,
 		Command: []string{"sh", "-c"},
 		Args:    []string{`echo -n "hello" > /tmp/mnt/hello.txt`},
 		VolumeMounts: []apiv1.VolumeMount{
@@ -452,13 +485,16 @@ func Test_RunnerWithPreInit(t *testing.T) {
 func Test_RunnerWithSideCar(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
 						Containers: []apiv1.Container{
 							{
 								Name:    "main",
-								Image:   "golang:1.15",
+								Image:   goImageName,
 								Command: []string{"echo", "hello"},
 							},
 							{
@@ -493,13 +529,16 @@ func Test_RunnerWithSideCar(t *testing.T) {
 	})
 	t.Run("failure", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
 						Containers: []apiv1.Container{
 							{
 								Name:    "main",
-								Image:   "golang:1.15",
+								Image:   goImageName,
 								Command: []string{"cat", "fuga"},
 							},
 							{
@@ -528,7 +567,7 @@ func Test_RunnerWithSideCar(t *testing.T) {
 						t.Fatalf("cannot get output %q", string(out))
 					}
 					var failedJob *kubejob.FailedJob
-					if xerrors.As(err, &failedJob) {
+					if errors.As(err, &failedJob) {
 						for _, container := range failedJob.FailedContainers() {
 							if container.Name != "main" {
 								t.Fatalf("cannot get valid container: %s", container.Name)
@@ -548,13 +587,16 @@ func Test_RunnerWithSideCar(t *testing.T) {
 
 func Test_RunnerWithCancel(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{
 						{
 							Name:    "test",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"echo", "$TEST"},
 						},
 					},
@@ -583,13 +625,16 @@ func Test_Copy(t *testing.T) {
 		defer os.RemoveAll(dir)
 
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
 						Containers: []apiv1.Container{
 							{
 								Name:    "test",
-								Image:   "golang:1.17",
+								Image:   goImageName,
 								Command: []string{"sh", "-c"},
 								Args: []string{
 									`
@@ -656,13 +701,16 @@ ln -s /tmp/symfile /tmp/artifacts/symfile
 		}
 
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
 						Containers: []apiv1.Container{
 							{
 								Name:    "test",
-								Image:   "golang:1.17",
+								Image:   goImageName,
 								Command: []string{"cat"},
 								Args:    []string{filepath.Join("/", "tmp", "artifacts", "artifact.txt")},
 							},

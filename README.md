@@ -8,12 +8,14 @@ A library for managing Kubernetes Job in Go
 
 # Features
 
-- Creating a Kubernetes Job
+- Creates a Kubernetes Job
 - Run and wait for Kubernetes Job
-- Can capture logs of Kubernetes Job
+- Capture logs of Kubernetes Job
 - Can use `context.Context` to run Kubernetes Job
 - Delayed execution of Kubernetes Job ( also support Sidecar pattern )
 - Can control execution order ( and timing ) of command for multiple containers at Job
+- Copy any files or directory between local file system and container in Job
+- Can insert any process before the process of the init container
 - Automatically clean up Kubernetes Job
 
 # Installation
@@ -44,7 +46,7 @@ job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
         Containers: []apiv1.Container{
           {
             Name:    "test",
-            Image:   "golang:1.15",
+            Image:   "golang:1.17",
             Command: []string{"echo", "hello"},
           },
         },
@@ -95,7 +97,7 @@ job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
         Containers: []apiv1.Container{
           {
             Name:    "main",
-            Image:   "golang:1.15",
+            Image:   "golang:1.17",
             Command: []string{"echo", "hello"},
           },
           {
@@ -141,7 +143,7 @@ See https://github.com/goccy/kubejob/blob/master/testdata/config/manifest.yaml#L
 ### Installation
 
 ```bash
-go get github.com/goccy/kubejob/cmd/kubejob
+go install github.com/goccy/kubejob/cmd/kubejob
 ```
 
 ```console
@@ -160,7 +162,7 @@ Help Options:
 ### Example
 
 ```bash
-$ kubejob --image golang:1.14 -- go version
+$ kubejob --image golang:1.17 -- go version
 go version
-go version go1.14.4 linux/amd64
+go version go1.17.0 linux/amd64
 ```

@@ -37,12 +37,6 @@ rules:
       - pods/exec
     verbs:
       - create
-  - apiGroups:
-      - ""
-    resources:
-      - secrets
-    verbs:
-      - get
 ---
 kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1beta1
