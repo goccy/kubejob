@@ -5,21 +5,29 @@ on:
       - master
   pull_request:
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: build kubejob
+        run: |
+          go build -o kubejob ./cmd/kubejob
   test:
     runs-on: ubuntu-latest
     steps:
-    - name: checkout
-      uses: actions/checkout@v2
-    - name: setup kind
-      run: |
-        make deploy
-    - name: wait for available
-      run: |
-        make wait
-    - name: Run test
-      run: |
-        timeout 600 make test
-    - uses: codecov/codecov-action@v2
-      with:
-        fail_ci_if_error: true
-        verbose: true
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: setup kind
+        run: |
+          make deploy
+      - name: wait for available
+        run: |
+          make wait
+      - name: Run test
+        run: |
+          timeout 600 make test
+      - uses: codecov/codecov-action@v2
+        with:
+          fail_ci_if_error: true
+          verbose: true
