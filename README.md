@@ -44,7 +44,7 @@ job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
         Containers: []apiv1.Container{
           {
             Name:    "test",
-            Image:   "golang:1.15",
+            Image:   "golang:1.17",
             Command: []string{"echo", "hello"},
           },
         },
@@ -95,7 +95,7 @@ job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
         Containers: []apiv1.Container{
           {
             Name:    "main",
-            Image:   "golang:1.15",
+            Image:   "golang:1.17",
             Command: []string{"echo", "hello"},
           },
           {
@@ -160,7 +160,7 @@ Help Options:
 ### Example
 
 ```bash
-$ kubejob --image golang:1.14 -- go version
+$ kubejob --image golang:1.17 -- go version
 go version
-go version go1.14.4 linux/amd64
+go version go1.17.0 linux/amd64
 ```

@@ -1,6 +1,6 @@
 module github.com/goccy/kubejob
 
-go 1.14
+go 1.16
 
 require (
 	github.com/imdario/mergo v0.3.11 // indirect

@@ -15,6 +15,10 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+const (
+	goImageName = "golang:1.17"
+)
+
 var (
 	cfg *rest.Config
 )
@@ -29,7 +33,7 @@ func init() {
 
 func Test_SimpleRunning(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").
-		SetImage("golang:1.15").
+		SetImage(goImageName).
 		SetCommand([]string{"go", "version"}).
 		Build()
 	if err != nil {
@@ -54,7 +58,7 @@ func Test_Run(t *testing.T) {
 					Containers: []apiv1.Container{
 						{
 							Name:    "test",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"echo", "hello"},
 						},
 					},
@@ -81,7 +85,7 @@ func Test_RunWithVerboseLog(t *testing.T) {
 					Containers: []apiv1.Container{
 						{
 							Name:    "test",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"echo", "hello"},
 						},
 					},
@@ -109,7 +113,7 @@ func Test_CaptureVerboseLog(t *testing.T) {
 					Containers: []apiv1.Container{
 						{
 							Name:    "test",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"echo", "hello"},
 						},
 					},
@@ -144,7 +148,7 @@ func Test_RunWithContainerLogger(t *testing.T) {
 					Containers: []apiv1.Container{
 						{
 							Name:    "test",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"echo", "hello"},
 						},
 					},
@@ -194,7 +198,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 						Containers: []apiv1.Container{
 							{
 								Name:    "test",
-								Image:   "golang:1.15",
+								Image:   goImageName,
 								Command: []string{"sh", "-c"},
 								Args: []string{
 									`set -eu
@@ -241,7 +245,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 						Containers: []apiv1.Container{
 							{
 								Name:    "test",
-								Image:   "golang:1.15",
+								Image:   goImageName,
 								Command: []string{"cat", "fuga"},
 							},
 						},
@@ -291,7 +295,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 						Containers: []apiv1.Container{
 							{
 								Name:    "test",
-								Image:   "golang:1.15",
+								Image:   goImageName,
 								Command: []string{"echo", "$TEST"},
 							},
 						},
@@ -344,7 +348,7 @@ func Test_RunnerWithInitContainers(t *testing.T) {
 					InitContainers: []apiv1.Container{
 						{
 							Name:    "init-touch",
-							Image:   "golang:1.16",
+							Image:   goImageName,
 							Command: []string{"touch", "/tmp/mnt/hello.txt"},
 							VolumeMounts: []apiv1.VolumeMount{
 								{
@@ -357,7 +361,7 @@ func Test_RunnerWithInitContainers(t *testing.T) {
 					Containers: []apiv1.Container{
 						{
 							Name:    "confirm",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"ls", "/tmp/mnt/hello.txt"},
 							VolumeMounts: []apiv1.VolumeMount{
 								{
@@ -409,7 +413,7 @@ func Test_RunnerWithPreInit(t *testing.T) {
 					InitContainers: []apiv1.Container{
 						{
 							Name:    "after-preinit",
-							Image:   "golang:1.17",
+							Image:   goImageName,
 							Command: []string{"cat", "/tmp/mnt/hello.txt"},
 							VolumeMounts: []apiv1.VolumeMount{
 								{
@@ -422,7 +426,7 @@ func Test_RunnerWithPreInit(t *testing.T) {
 					Containers: []apiv1.Container{
 						{
 							Name:    "after-init",
-							Image:   "golang:1.17",
+							Image:   goImageName,
 							Command: []string{"cat", "/tmp/mnt/hello.txt"},
 							VolumeMounts: []apiv1.VolumeMount{
 								{
@@ -449,7 +453,7 @@ func Test_RunnerWithPreInit(t *testing.T) {
 	}
 	job.PreInit(apiv1.Container{
 		Name:    "preinit",
-		Image:   "golang:1.17",
+		Image:   goImageName,
 		Command: []string{"sh", "-c"},
 		Args:    []string{`echo -n "hello" > /tmp/mnt/hello.txt`},
 		VolumeMounts: []apiv1.VolumeMount{
@@ -490,7 +494,7 @@ func Test_RunnerWithSideCar(t *testing.T) {
 						Containers: []apiv1.Container{
 							{
 								Name:    "main",
-								Image:   "golang:1.15",
+								Image:   goImageName,
 								Command: []string{"echo", "hello"},
 							},
 							{
@@ -534,7 +538,7 @@ func Test_RunnerWithSideCar(t *testing.T) {
 						Containers: []apiv1.Container{
 							{
 								Name:    "main",
-								Image:   "golang:1.15",
+								Image:   goImageName,
 								Command: []string{"cat", "fuga"},
 							},
 							{
@@ -592,7 +596,7 @@ func Test_RunnerWithCancel(t *testing.T) {
 					Containers: []apiv1.Container{
 						{
 							Name:    "test",
-							Image:   "golang:1.15",
+							Image:   goImageName,
 							Command: []string{"echo", "$TEST"},
 						},
 					},
@@ -630,7 +634,7 @@ func Test_Copy(t *testing.T) {
 						Containers: []apiv1.Container{
 							{
 								Name:    "test",
-								Image:   "golang:1.17",
+								Image:   goImageName,
 								Command: []string{"sh", "-c"},
 								Args: []string{
 									`
@@ -706,7 +710,7 @@ ln -s /tmp/symfile /tmp/artifacts/symfile
 						Containers: []apiv1.Container{
 							{
 								Name:    "test",
-								Image:   "golang:1.17",
+								Image:   goImageName,
 								Command: []string{"cat"},
 								Args:    []string{filepath.Join("/", "tmp", "artifacts", "artifact.txt")},
 							},
