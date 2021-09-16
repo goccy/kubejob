@@ -134,7 +134,7 @@ if err := job.RunWithExecutionHandler(context.Background(), func(executors []*ku
 
 ## Role
 
-See https://github.com/goccy/kubejob/blob/master/testdata/config/manifest.yaml#L6-L45
+See https://github.com/goccy/kubejob/blob/c36972bf8d00fea4f6bbb0325640295edba91b03/testdata/config/manifest.yaml#L6-L39
 
 # Tools
 
