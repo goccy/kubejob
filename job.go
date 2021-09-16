@@ -31,7 +31,9 @@ import (
 )
 
 const (
-	KubejobLabel = "kubejob.io/id"
+	SelectorLabel        = "kubejob.io/id"
+	DefaultJobName       = "kubejob-"
+	DefaultContainerName = "kubejob"
 )
 
 var (
@@ -100,20 +102,8 @@ func NewJobBuilder(config *rest.Config, namespace string) *JobBuilder {
 	}
 }
 
-func (b *JobBuilder) jobName() string {
-	return b.generateName("kubejob")
-}
-
-func (b *JobBuilder) containerName() string {
-	return b.generateName("kubejob-container")
-}
-
 func (b *JobBuilder) labelID() string {
 	return xid.New().String()
-}
-
-func (b *JobBuilder) generateName(name string) string {
-	return fmt.Sprintf("%s-%s", name, xid.New())
 }
 
 func (b *JobBuilder) SetImage(image string) *JobBuilder {
@@ -128,18 +118,18 @@ func (b *JobBuilder) SetCommand(cmd []string) *JobBuilder {
 
 func (b *JobBuilder) Build() (*Job, error) {
 	if b.image == "" {
-		return nil, xerrors.Errorf("could not find container.image name")
+		return nil, xerrors.Errorf("container image must be specified")
 	}
 	return b.BuildWithJob(&batch.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: b.jobName(),
+			GenerateName: DefaultJobName,
 		},
 		Spec: batch.JobSpec{
 			Template: core.PodTemplateSpec{
 				Spec: core.PodSpec{
 					Containers: []core.Container{
 						{
-							Name:    b.containerName(),
+							Name:    DefaultContainerName,
 							Image:   b.image,
 							Command: b.command,
 						},
@@ -168,8 +158,8 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 	jobClient := clientset.BatchV1().Jobs(b.namespace)
 	podClient := clientset.CoreV1().Pods(b.namespace)
 	restClient := clientset.CoreV1().RESTClient()
-	if jobSpec.ObjectMeta.Name == "" {
-		jobSpec.ObjectMeta.Name = b.jobName()
+	if jobSpec.ObjectMeta.Name == "" && jobSpec.ObjectMeta.GenerateName == "" {
+		return nil, xerrors.Errorf("job name must be specified")
 	}
 	if jobSpec.Spec.Template.Spec.RestartPolicy == "" {
 		jobSpec.Spec.Template.Spec.RestartPolicy = core.RestartPolicyNever
@@ -179,13 +169,16 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batch.Job) (*Job, error) {
 	}
 	for idx := range jobSpec.Spec.Template.Spec.Containers {
 		if jobSpec.Spec.Template.Spec.Containers[idx].Name == "" {
-			jobSpec.Spec.Template.Spec.Containers[idx].Name = b.containerName()
+			return nil, xerrors.Errorf("%s job container name is empty")
+		}
+		if jobSpec.Spec.Template.Spec.Containers[idx].Image == "" {
+			return nil, xerrors.Errorf("%s job container image is empty")
 		}
 	}
 	if jobSpec.Spec.Template.Labels == nil {
 		jobSpec.Spec.Template.Labels = map[string]string{}
 	}
-	jobSpec.Spec.Template.Labels[KubejobLabel] = b.labelID()
+	jobSpec.Spec.Template.Labels[SelectorLabel] = b.labelID()
 
 	return &Job{
 		Job:        jobSpec,
@@ -646,7 +639,7 @@ func (j *Job) cleanup(ctx context.Context) error {
 	}
 	j.logf("%d pods found", len(podList.Items))
 	for _, pod := range podList.Items {
-		j.logf("delete pod: %s job-id: %s", pod.Name, pod.Labels[KubejobLabel])
+		j.logf("delete pod: %s job-id: %s", pod.Name, pod.Labels[SelectorLabel])
 		if err := j.podClient.Delete(ctx, pod.Name, metav1.DeleteOptions{
 			GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
 		}); err != nil {
@@ -664,9 +657,11 @@ func (j *Job) Run(ctx context.Context) (e error) {
 		initContainers := j.Job.Spec.Template.Spec.InitContainers
 		j.Job.Spec.Template.Spec.InitContainers = append([]core.Container{j.preInit.container}, initContainers...)
 	}
-	if _, err := j.jobClient.Create(ctx, j.Job, metav1.CreateOptions{}); err != nil {
+	job, err := j.jobClient.Create(ctx, j.Job, metav1.CreateOptions{})
+	if err != nil {
 		return xerrors.Errorf("failed to create job: %w", err)
 	}
+	j.Name = job.Name
 	defer func() {
 		// we wouldn't like to cancel cleanup process by cancelled context,
 		// so create new context and use it.
@@ -733,9 +728,7 @@ func (j *Job) wait(ctx context.Context) error {
 }
 
 func (j *Job) labelSelector() string {
-	labels := j.Spec.Template.Labels
-	value := labels[KubejobLabel]
-	return fmt.Sprintf("%s=%s", KubejobLabel, value)
+	return fmt.Sprintf("%s=%s", SelectorLabel, j.Spec.Template.Labels[SelectorLabel])
 }
 
 func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) {

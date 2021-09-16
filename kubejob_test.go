@@ -11,6 +11,7 @@ import (
 	"golang.org/x/xerrors"
 	batchv1 "k8s.io/api/batch/v1"
 	apiv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 )
 
@@ -44,6 +45,9 @@ func Test_SimpleRunning(t *testing.T) {
 
 func Test_Run(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
@@ -68,6 +72,9 @@ func Test_Run(t *testing.T) {
 
 func Test_RunWithVerboseLog(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
@@ -82,10 +89,10 @@ func Test_RunWithVerboseLog(t *testing.T) {
 			},
 		},
 	})
-	job.SetVerboseLog(true)
 	if err != nil {
 		t.Fatalf("failed to build job: %+v", err)
 	}
+	job.SetVerboseLog(true)
 	if err := job.Run(context.Background()); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
@@ -93,6 +100,9 @@ func Test_RunWithVerboseLog(t *testing.T) {
 
 func Test_CaptureVerboseLog(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
@@ -107,14 +117,14 @@ func Test_CaptureVerboseLog(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("failed to build job: %+v", err)
+	}
 	job.SetVerboseLog(true)
 	logs := []string{}
 	job.SetLogger(func(log string) {
 		logs = append(logs, log)
 	})
-	if err != nil {
-		t.Fatalf("failed to build job: %+v", err)
-	}
 	if err := job.Run(context.Background()); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
@@ -125,6 +135,9 @@ func Test_CaptureVerboseLog(t *testing.T) {
 
 func Test_RunWithContainerLogger(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
@@ -139,6 +152,10 @@ func Test_RunWithContainerLogger(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("failed to build job: %+v", err)
+	}
+
 	var (
 		callbacked      bool
 		containerLogErr error
@@ -154,9 +171,6 @@ func Test_RunWithContainerLogger(t *testing.T) {
 			return
 		}
 	})
-	if err != nil {
-		t.Fatalf("failed to build job: %+v", err)
-	}
 	if err := job.Run(context.Background()); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
@@ -171,6 +185,9 @@ func Test_RunWithContainerLogger(t *testing.T) {
 func Test_RunnerWithExecutionHandler(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
@@ -215,6 +232,9 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 	})
 	t.Run("failure", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
@@ -262,6 +282,9 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 		defer reset()
 
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
@@ -312,6 +335,9 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 
 func Test_RunnerWithInitContainers(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
@@ -374,6 +400,9 @@ func Test_RunnerWithInitContainers(t *testing.T) {
 
 func Test_RunnerWithPreInit(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
@@ -452,6 +481,9 @@ func Test_RunnerWithPreInit(t *testing.T) {
 func Test_RunnerWithSideCar(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
@@ -493,6 +525,9 @@ func Test_RunnerWithSideCar(t *testing.T) {
 	})
 	t.Run("failure", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
@@ -548,6 +583,9 @@ func Test_RunnerWithSideCar(t *testing.T) {
 
 func Test_RunnerWithCancel(t *testing.T) {
 	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
 		Spec: batchv1.JobSpec{
 			Template: apiv1.PodTemplateSpec{
 				Spec: apiv1.PodSpec{
@@ -583,6 +621,9 @@ func Test_Copy(t *testing.T) {
 		defer os.RemoveAll(dir)
 
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
@@ -656,6 +697,9 @@ ln -s /tmp/symfile /tmp/artifacts/symfile
 		}
 
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
 					Spec: apiv1.PodSpec{
