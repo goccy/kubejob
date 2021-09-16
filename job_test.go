@@ -2,13 +2,13 @@ package kubejob_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/goccy/kubejob"
-	"golang.org/x/xerrors"
 	batchv1 "k8s.io/api/batch/v1"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -163,11 +163,11 @@ func Test_RunWithContainerLogger(t *testing.T) {
 	job.SetContainerLogger(func(log *kubejob.ContainerLog) {
 		callbacked = true
 		if log.Pod == nil {
-			containerLogErr = xerrors.Errorf("could not find ContainerLog.Pod")
+			containerLogErr = fmt.Errorf("could not find ContainerLog.Pod")
 			return
 		}
 		if log.Container.Name != "test" {
-			containerLogErr = xerrors.Errorf("could not find ContainerLog.Container %s", log.Container.Name)
+			containerLogErr = fmt.Errorf("could not find ContainerLog.Container %s", log.Container.Name)
 			return
 		}
 	})
@@ -259,7 +259,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 					t.Fatal("expect error")
 				}
 				var failedJob *kubejob.FailedJob
-				if xerrors.As(err, &failedJob) {
+				if errors.As(err, &failedJob) {
 					for _, container := range failedJob.FailedContainers() {
 						if container.Name != "test" {
 							t.Fatalf("cannot get valid container: %s", container.Name)
@@ -310,7 +310,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 					t.Fatal("expect error")
 				}
 				var failedJob *kubejob.FailedJob
-				if xerrors.As(err, &failedJob) {
+				if errors.As(err, &failedJob) {
 					for _, container := range failedJob.FailedContainers() {
 						if container.Name != "test" {
 							t.Fatalf("cannot get valid container: %s", container.Name)
@@ -319,7 +319,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 				} else {
 					t.Fatal("cannot get FailedJob")
 				}
-				if err.Error() == "failed to job" {
+				if err.Error() == "job: failed to job" {
 					t.Fatal("expect extra error message. but got empty")
 				}
 				if string(out) != "" {
@@ -563,7 +563,7 @@ func Test_RunnerWithSideCar(t *testing.T) {
 						t.Fatalf("cannot get output %q", string(out))
 					}
 					var failedJob *kubejob.FailedJob
-					if xerrors.As(err, &failedJob) {
+					if errors.As(err, &failedJob) {
 						for _, container := range failedJob.FailedContainers() {
 							if container.Name != "main" {
 								t.Fatalf("cannot get valid container: %s", container.Name)
