@@ -67,15 +67,27 @@ func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
 		writerErr = e.writeWithTar(writer, srcPath, dstPath)
 	}()
 
-	var outCapturer bytes.Buffer
+	var (
+		outCapturer bytes.Buffer
+		errCapturer bytes.Buffer
+	)
 	readerErr := exec.Stream(remotecommand.StreamOptions{
 		Stdin:  reader,
 		Stdout: &outCapturer,
-		Stderr: &outCapturer,
+		Stderr: &errCapturer,
 		Tty:    false,
 	})
 	if readerErr != nil || writerErr != nil {
-		return errCopyWithReaderWriter(srcPath, dstPath, readerErr, writerErr, outCapturer.String())
+		buf := []string{}
+		stdout := outCapturer.String()
+		if len(stdout) > 0 {
+			buf = append(buf, stdout)
+		}
+		stderr := errCapturer.String()
+		if len(stderr) > 0 {
+			buf = append(buf, stderr)
+		}
+		return errCopyWithReaderWriter(srcPath, dstPath, readerErr, writerErr, strings.Join(buf, ":"))
 	}
 	return nil
 }
