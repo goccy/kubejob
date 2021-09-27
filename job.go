@@ -70,6 +70,7 @@ type Job struct {
 	config                   *rest.Config
 	podRunningCallback       func(*corev1.Pod) error
 	preInit                  *preInit
+	jobInit                  *jobInit
 }
 
 type ContainerLogger func(*ContainerLog)
@@ -148,6 +149,9 @@ func (j *Job) cleanup(ctx context.Context) error {
 }
 
 func (j *Job) Run(ctx context.Context) (e error) {
+	if j.jobInit != nil {
+		j.Job.Spec.Template.Spec.InitContainers = j.jobInit.containers
+	}
 	if j.preInit != nil {
 		initContainers := j.Job.Spec.Template.Spec.InitContainers
 		j.Job.Spec.Template.Spec.InitContainers = append([]corev1.Container{j.preInit.container}, initContainers...)
@@ -256,6 +260,14 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 			}
 			if j.preInit.needsToRun(pod.Status) {
 				if err := j.preInit.run(pod); err != nil {
+					return err
+				}
+			}
+			if j.jobInit.needsToRun(pod.Status) {
+				if j.preInit != nil && !j.preInit.done {
+					continue
+				}
+				if err := j.jobInit.run(pod); err != nil {
 					return err
 				}
 			}

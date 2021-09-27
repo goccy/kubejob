@@ -216,6 +216,73 @@ func (e *JobExecutor) Stop() error {
 	return nil
 }
 
+type JobInitContainerExecutionHandler func(*JobExecutor) error
+
+type jobInit struct {
+	done       bool
+	containers []corev1.Container
+	executors  []*JobExecutor
+	stepNum    int
+	handler    JobInitContainerExecutionHandler
+}
+
+func (j *jobInit) needsToRun(status corev1.PodStatus) bool {
+	if j == nil {
+		return false
+	}
+	if j.done {
+		return false
+	}
+	if status.Phase != corev1.PodPending {
+		return false
+	}
+	return true
+}
+
+func (j *jobInit) run(pod *corev1.Pod) error {
+	if j.done {
+		return nil
+	}
+	for _, status := range pod.Status.InitContainerStatuses {
+		if status.State.Running != nil {
+			exec := j.executors[j.stepNum]
+			exec.Pod = pod
+			if err := j.handler(exec); err != nil {
+				return err
+			}
+			if err := exec.Stop(); err != nil {
+				return err
+			}
+			j.stepNum++
+		}
+	}
+	if j.stepNum >= len(j.executors) {
+		j.done = true
+	}
+	return nil
+}
+
+func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecutionHandler) error {
+	if handler == nil {
+		return fmt.Errorf("job: failed to set JobInitContainerExecutionHandler. handler is nil")
+	}
+	jobInit := &jobInit{
+		handler: handler,
+	}
+	for _, c := range j.Job.Spec.Template.Spec.InitContainers {
+		c := c
+		jobInit.executors = append(jobInit.executors, &JobExecutor{
+			Container: c,
+			command:   c.Command,
+			args:      c.Args,
+			job:       j,
+		})
+		jobInit.containers = append(jobInit.containers, jobTemplateCommandContainer(c))
+	}
+	j.jobInit = jobInit
+	return nil
+}
+
 type JobExecutionHandler func([]*JobExecutor) error
 
 func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler) error {
