@@ -16,15 +16,16 @@ import (
 )
 
 type JobExecutor struct {
-	Container   corev1.Container
-	Pod         *corev1.Pod
-	command     []string
-	args        []string
-	job         *Job
-	isRunning   bool
-	stopped     bool
-	isRunningMu sync.Mutex
-	err         error
+	Container    corev1.Container
+	ContainerIdx int
+	Pod          *corev1.Pod
+	command      []string
+	args         []string
+	job          *Job
+	isRunning    bool
+	stopped      bool
+	isRunningMu  sync.Mutex
+	err          error
 }
 
 // If a command like `sh -c "x; y; z" is passed as a cmd,
@@ -269,13 +270,14 @@ func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecution
 	jobInit := &jobInit{
 		handler: handler,
 	}
-	for _, c := range j.Job.Spec.Template.Spec.InitContainers {
+	for idx, c := range j.Job.Spec.Template.Spec.InitContainers {
 		c := c
 		jobInit.executors = append(jobInit.executors, &JobExecutor{
-			Container: c,
-			command:   c.Command,
-			args:      c.Args,
-			job:       j,
+			Container:    c,
+			ContainerIdx: idx,
+			command:      c.Command,
+			args:         c.Args,
+			job:          j,
 		})
 		jobInit.containers = append(jobInit.containers, jobTemplateCommandContainer(c))
 	}
@@ -309,10 +311,11 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 		command := container.Command
 		args := container.Args
 		executorMap[container.Name] = &JobExecutor{
-			Container: container,
-			command:   command,
-			args:      args,
-			job:       j,
+			Container:    container,
+			ContainerIdx: idx,
+			command:      command,
+			args:         args,
+			job:          j,
 		}
 		j.Job.Spec.Template.Spec.Containers[idx].Command = []string{"sh"}
 		j.Job.Spec.Template.Spec.Containers[idx].Args = []string{"-c", jobCommandTemplate}
