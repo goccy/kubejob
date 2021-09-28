@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	core "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -119,27 +120,45 @@ func (e *JobExecutor) CopyFromPod(srcPath, dstPath string) error {
 	reader, writer := io.Pipe()
 
 	var (
-		writerErr   error
-		errCapturer bytes.Buffer
+		writerMu          sync.RWMutex
+		writerErr         error
+		writerErrCapturer bytes.Buffer
+		readerErrCapturer bytes.Buffer
 	)
 	go func() {
 		defer func() {
 			writer.Close()
 		}()
-		writerErr = exec.Stream(remotecommand.StreamOptions{
+		var errCapturer bytes.Buffer
+		err := exec.Stream(remotecommand.StreamOptions{
 			Stdin:  nil,
 			Stdout: writer,
 			Stderr: &errCapturer,
 			Tty:    false,
 		})
+		writerMu.Lock()
+		writerErr = err
+		writerErrCapturer = errCapturer
+		writerMu.Unlock()
 	}()
 
 	// tar trims the leading '/' if it's there
 	tarPrefix := strings.TrimLeft(srcPath, "/")
 	tarPrefix = e.trimShortcutPath(path.Clean(tarPrefix))
-	readerErr := e.untarAll(reader, &errCapturer, tarPrefix, srcPath, dstPath)
+	readerErr := e.untarAll(reader, &readerErrCapturer, tarPrefix, srcPath, dstPath)
+	writerMu.RLock()
+	defer writerMu.RUnlock()
 	if readerErr != nil || writerErr != nil {
-		return errCopyWithReaderWriter(srcPath, dstPath, readerErr, writerErr, errCapturer.String())
+		buf := []string{}
+		rerr := readerErrCapturer.String()
+		if len(rerr) > 0 {
+			buf = append(buf, rerr)
+		}
+		werr := writerErrCapturer.String()
+		if len(werr) > 0 {
+			buf = append(buf, werr)
+		}
+		return errCopyWithReaderWriter(srcPath, dstPath, readerErr, writerErr, strings.Join(buf, ":"))
 	}
 	return nil
 }
