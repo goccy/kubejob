@@ -220,11 +220,12 @@ func (e *JobExecutor) Stop() error {
 type JobInitContainerExecutionHandler func(*JobExecutor) error
 
 type jobInit struct {
-	done       bool
-	containers []corev1.Container
-	executors  []*JobExecutor
-	stepNum    int
-	handler    JobInitContainerExecutionHandler
+	done                     bool
+	containers               []corev1.Container
+	executors                []*JobExecutor
+	executedContainerNameMap map[string]struct{}
+	stepNum                  int
+	handler                  JobInitContainerExecutionHandler
 }
 
 func (j *jobInit) needsToRun(status corev1.PodStatus) bool {
@@ -246,15 +247,25 @@ func (j *jobInit) run(pod *corev1.Pod) error {
 	}
 	for _, status := range pod.Status.InitContainerStatuses {
 		if status.State.Running != nil {
-			exec := j.executors[j.stepNum]
-			exec.Pod = pod
-			if err := j.handler(exec); err != nil {
-				return err
+			if _, exists := j.executedContainerNameMap[status.Name]; exists {
+				continue
 			}
-			if err := exec.Stop(); err != nil {
-				return err
+			for _, c := range pod.Spec.InitContainers {
+				if c.Name == status.Name {
+					if len(c.Args) > 0 && c.Args[0] == jobCommandTemplate {
+						exec := j.executors[j.stepNum]
+						exec.Pod = pod
+						if err := j.handler(exec); err != nil {
+							return err
+						}
+						if err := exec.Stop(); err != nil {
+							return err
+						}
+						j.stepNum++
+						j.executedContainerNameMap[status.Name] = struct{}{}
+					}
+				}
 			}
-			j.stepNum++
 		}
 	}
 	if j.stepNum >= len(j.executors) {
@@ -268,7 +279,8 @@ func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecution
 		return fmt.Errorf("job: failed to set JobInitContainerExecutionHandler. handler is nil")
 	}
 	jobInit := &jobInit{
-		handler: handler,
+		handler:                  handler,
+		executedContainerNameMap: map[string]struct{}{},
 	}
 	for idx, c := range j.Job.Spec.Template.Spec.InitContainers {
 		c := c

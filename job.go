@@ -151,6 +151,10 @@ func (j *Job) cleanup(ctx context.Context) error {
 func (j *Job) Run(ctx context.Context) (e error) {
 	if j.jobInit != nil {
 		j.Job.Spec.Template.Spec.InitContainers = j.jobInit.containers
+		if j.preInit != nil {
+			// ignore preinit container
+			j.jobInit.executedContainerNameMap[j.preInit.container.Name] = struct{}{}
+		}
 	}
 	if j.preInit != nil {
 		initContainers := j.Job.Spec.Template.Spec.InitContainers
