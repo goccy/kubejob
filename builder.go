@@ -96,6 +96,9 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batchv1.Job) (*Job, error) {
 		jobSpec.Spec.BackoffLimit = new(int32)
 	}
 	for idx := range jobSpec.Spec.Template.Spec.Containers {
+		if jobSpec.Spec.Template.Spec.Containers[idx].Name == "" {
+			return nil, errRequiredParam("container.name")
+		}
 		if len(jobSpec.Spec.Template.Spec.Containers[idx].Command) == 0 {
 			return nil, errRequiredParam("container.command")
 		}
