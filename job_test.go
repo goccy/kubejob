@@ -482,6 +482,106 @@ func Test_RunnerWithPreInit(t *testing.T) {
 	}
 }
 
+func Test_RunnerWithInitExecutionHandler(t *testing.T) {
+	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "kubejob-",
+		},
+		Spec: batchv1.JobSpec{
+			Template: apiv1.PodTemplateSpec{
+				Spec: apiv1.PodSpec{
+					InitContainers: []apiv1.Container{
+						{
+							Name:    "after-preinit",
+							Image:   goImageName,
+							Command: []string{"cat", "/tmp/mnt/hello.txt"},
+							VolumeMounts: []apiv1.VolumeMount{
+								{
+									Name:      "shared",
+									MountPath: "/tmp/mnt",
+								},
+							},
+						},
+						{
+							Name:    "init2",
+							Image:   goImageName,
+							Command: []string{"ls", "/tmp/mnt/hello.txt"},
+							VolumeMounts: []apiv1.VolumeMount{
+								{
+									Name:      "shared",
+									MountPath: "/tmp/mnt",
+								},
+							},
+						},
+					},
+					Containers: []apiv1.Container{
+						{
+							Name:    "after-init",
+							Image:   goImageName,
+							Command: []string{"cat", "/tmp/mnt/hello.txt"},
+							VolumeMounts: []apiv1.VolumeMount{
+								{
+									Name:      "shared",
+									MountPath: "/tmp/mnt",
+								},
+							},
+						},
+					},
+					Volumes: []apiv1.Volume{
+						{
+							Name: "shared",
+							VolumeSource: apiv1.VolumeSource{
+								EmptyDir: &apiv1.EmptyDirVolumeSource{},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to build job: %+v", err)
+	}
+	job.PreInit(apiv1.Container{
+		Name:    "preinit",
+		Image:   goImageName,
+		Command: []string{"sh", "-c"},
+		Args:    []string{`echo -n "hello" > /tmp/mnt/hello.txt`},
+		VolumeMounts: []apiv1.VolumeMount{
+			{
+				Name:      "shared",
+				MountPath: "/tmp/mnt",
+			},
+		},
+	}, func(exec *kubejob.JobExecutor) error {
+		_, err := exec.Exec()
+		return err
+	})
+	var calledInitNum int
+	job.SetInitContainerExecutionHandler(func(exec *kubejob.JobExecutor) error {
+		calledInitNum++
+		_, err := exec.Exec()
+		return err
+	})
+	if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+		for _, exec := range executors {
+			out, err := exec.Exec()
+			if err != nil {
+				t.Fatalf("%s: %+v", string(out), err)
+			}
+			if string(out) != "hello" {
+				t.Fatalf("cannot get output %q", string(out))
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to run: %+v", err)
+	}
+	if calledInitNum != 2 {
+		t.Fatal("failed to call init execution handler")
+	}
+}
+
 func Test_RunnerWithSideCar(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{

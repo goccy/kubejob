@@ -16,15 +16,16 @@ import (
 )
 
 type JobExecutor struct {
-	Container   corev1.Container
-	Pod         *corev1.Pod
-	command     []string
-	args        []string
-	job         *Job
-	isRunning   bool
-	stopped     bool
-	isRunningMu sync.Mutex
-	err         error
+	Container    corev1.Container
+	ContainerIdx int
+	Pod          *corev1.Pod
+	command      []string
+	args         []string
+	job          *Job
+	isRunning    bool
+	stopped      bool
+	isRunningMu  sync.Mutex
+	err          error
 }
 
 // If a command like `sh -c "x; y; z" is passed as a cmd,
@@ -216,6 +217,86 @@ func (e *JobExecutor) Stop() error {
 	return nil
 }
 
+type JobInitContainerExecutionHandler func(*JobExecutor) error
+
+type jobInit struct {
+	done                     bool
+	containers               []corev1.Container
+	executors                []*JobExecutor
+	executedContainerNameMap map[string]struct{}
+	stepNum                  int
+	handler                  JobInitContainerExecutionHandler
+}
+
+func (j *jobInit) needsToRun(status corev1.PodStatus) bool {
+	if j == nil {
+		return false
+	}
+	if j.done {
+		return false
+	}
+	if status.Phase != corev1.PodPending {
+		return false
+	}
+	return true
+}
+
+func (j *jobInit) run(pod *corev1.Pod) error {
+	if j.done {
+		return nil
+	}
+	for _, status := range pod.Status.InitContainerStatuses {
+		if status.State.Running != nil {
+			if _, exists := j.executedContainerNameMap[status.Name]; exists {
+				continue
+			}
+			for _, c := range pod.Spec.InitContainers {
+				if c.Name == status.Name {
+					if len(c.Args) > 0 && c.Args[0] == jobCommandTemplate {
+						exec := j.executors[j.stepNum]
+						exec.Pod = pod
+						if err := j.handler(exec); err != nil {
+							return err
+						}
+						if err := exec.Stop(); err != nil {
+							return err
+						}
+						j.stepNum++
+						j.executedContainerNameMap[status.Name] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	if j.stepNum >= len(j.executors) {
+		j.done = true
+	}
+	return nil
+}
+
+func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecutionHandler) error {
+	if handler == nil {
+		return fmt.Errorf("job: failed to set JobInitContainerExecutionHandler. handler is nil")
+	}
+	jobInit := &jobInit{
+		handler:                  handler,
+		executedContainerNameMap: map[string]struct{}{},
+	}
+	for idx, c := range j.Job.Spec.Template.Spec.InitContainers {
+		c := c
+		jobInit.executors = append(jobInit.executors, &JobExecutor{
+			Container:    c,
+			ContainerIdx: idx,
+			command:      c.Command,
+			args:         c.Args,
+			job:          j,
+		})
+		jobInit.containers = append(jobInit.containers, jobTemplateCommandContainer(c))
+	}
+	j.jobInit = jobInit
+	return nil
+}
+
 type JobExecutionHandler func([]*JobExecutor) error
 
 func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler) error {
@@ -242,10 +323,11 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 		command := container.Command
 		args := container.Args
 		executorMap[container.Name] = &JobExecutor{
-			Container: container,
-			command:   command,
-			args:      args,
-			job:       j,
+			Container:    container,
+			ContainerIdx: idx,
+			command:      command,
+			args:         args,
+			job:          j,
 		}
 		j.Job.Spec.Template.Spec.Containers[idx].Command = []string{"sh"}
 		j.Job.Spec.Template.Spec.Containers[idx].Args = []string{"-c", jobCommandTemplate}
