@@ -33,17 +33,21 @@ $ go get github.com/goccy/kubejob
 import (
   "github.com/goccy/kubejob"
   batchv1 "k8s.io/api/batch/v1"
-  apiv1 "k8s.io/api/core/v1"
+  corev1 "k8s.io/api/core/v1"
+  metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
   "k8s.io/client-go/rest"
 )
 
 var cfg *rest.Config // = rest.InClusterConfig() assign *rest.Config value to cfg
 
 job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+  ObjectMeta: metav1.ObjectMeta{
+    GenerateName: "kubejob-",
+  },
   Spec: batchv1.JobSpec{
-    Template: apiv1.PodTemplateSpec{
-      Spec: apiv1.PodSpec{
-        Containers: []apiv1.Container{
+    Template: corev1.PodTemplateSpec{
+      Spec: corev1.PodSpec{
+        Containers: []corev1.Container{
           {
             Name:    "test",
             Image:   "golang:1.17",
@@ -91,10 +95,13 @@ if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor
 
 ```go
 job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+  ObjectMeta: metav1.ObjectMeta{
+    GenerateName: "kubejob-",
+  },
   Spec: batchv1.JobSpec{
-    Template: apiv1.PodTemplateSpec{
-      Spec: apiv1.PodSpec{
-        Containers: []apiv1.Container{
+    Template: corev1.PodTemplateSpec{
+      Spec: corev1.PodSpec{
+        Containers: []corev1.Container{
           {
             Name:    "main",
             Image:   "golang:1.17",
@@ -134,7 +141,42 @@ if err := job.RunWithExecutionHandler(context.Background(), func(executors []*ku
 
 ## Role
 
-See https://github.com/goccy/kubejob/blob/c36972bf8d00fea4f6bbb0325640295edba91b03/testdata/config/manifest.yaml#L6-L39
+```yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubejob
+rules:
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - create
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - pods/log
+    verbs:
+      - get
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods/exec
+    verbs:
+      - create # required when using kubejob.JobExecutor
+```
 
 # Tools
 
