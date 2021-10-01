@@ -3,6 +3,7 @@ package kubejob
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -10,7 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/lestrrat-go/backoff"
 	core "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
@@ -35,7 +38,7 @@ func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
 		dstPath = filepath.Join(dstPath, path.Base(srcPath))
 	}
 
-	tarCmd := []string{"tar", "--no-same-permissions", "--no-same-owner", "-xmf", "-"}
+	tarCmd := []string{"tar", "--no-same-owner", "-xmf", "-"}
 	dstDir := filepath.Dir(dstPath)
 	if len(dstDir) > 0 {
 		tarCmd = append(tarCmd, "-C", dstDir)
@@ -95,6 +98,59 @@ func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
 
 // CopyFromPod copy directory or files from specified path on Pod.
 func (e *JobExecutor) CopyFromPod(srcPath, dstPath string) error {
+	return e.copyFromPodWithRetry(srcPath, dstPath)
+}
+
+func (e *JobExecutor) copyFromPodWithRetry(srcPath, dstPath string) error {
+	const copyRetryCount = 3
+
+	policy := backoff.NewExponential(
+		backoff.WithInterval(1*time.Second),
+		backoff.WithMaxRetries(copyRetryCount),
+	)
+	b, cancel := policy.Start(context.Background())
+	defer cancel()
+
+	var (
+		err        error
+		retryCount int
+	)
+	for backoff.Continue(b) {
+		err = e.copyFromPod(srcPath, dstPath)
+		if err != nil {
+			if e.isRetryableError(err) {
+				if err := os.RemoveAll(dstPath); err != nil {
+					e.job.logWarn("try to retry copy from pod. but cannot remove already exists dst path: %s", err)
+					break
+				}
+				// handle retryable error
+				e.job.logDebug(
+					"%s at %s. retry: %d/%d",
+					err,
+					e.Container.Name,
+					retryCount,
+					copyRetryCount,
+				)
+				retryCount++
+				continue
+			}
+		}
+		break
+	}
+	return err
+}
+
+func (e *JobExecutor) isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if err == io.ErrUnexpectedEOF {
+		return true
+	}
+	return false
+}
+
+func (e *JobExecutor) copyFromPod(srcPath, dstPath string) error {
 	if len(srcPath) == 0 || len(dstPath) == 0 {
 		return errCopyWithEmptyPath(srcPath, dstPath)
 	}
@@ -146,8 +202,14 @@ func (e *JobExecutor) CopyFromPod(srcPath, dstPath string) error {
 	tarPrefix := strings.TrimLeft(srcPath, "/")
 	tarPrefix = e.trimShortcutPath(path.Clean(tarPrefix))
 	readerErr := e.untarAll(reader, &readerErrCapturer, tarPrefix, srcPath, dstPath)
+	if e.isRetryableError(readerErr) {
+		return readerErr
+	}
 	writerMu.RLock()
 	defer writerMu.RUnlock()
+	if e.isRetryableError(writerErr) {
+		return writerErr
+	}
 	if readerErr != nil || writerErr != nil {
 		buf := []string{}
 		rerr := readerErrCapturer.String()
@@ -284,7 +346,7 @@ func (e *JobExecutor) untarAll(r io.Reader, errCapturer io.Writer, prefix, srcPa
 		header, err := tarReader.Next()
 		if err != nil {
 			if err != io.EOF {
-				return fmt.Errorf("failed to get next header: %w", err)
+				return fmt.Errorf("failed to get next header %T: %w", err, err)
 			}
 			break
 		}
@@ -322,7 +384,10 @@ func (e *JobExecutor) untarAll(r io.Reader, errCapturer io.Writer, prefix, srcPa
 			fmt.Fprintf(errCapturer, "warning: skipping symlink: %q -> %q\n", dstFileName, header.Linkname)
 			continue
 		}
-		if err := e.copyFileFromReader(dstFileName, tarReader); err != nil {
+		if err := e.copyFileFromReader(dstFileName, mode, tarReader); err != nil {
+			if err == io.ErrUnexpectedEOF {
+				return err
+			}
 			return fmt.Errorf("failed to copy file from reader %s: %w", dstFileName, err)
 		}
 	}
@@ -330,13 +395,16 @@ func (e *JobExecutor) untarAll(r io.Reader, errCapturer io.Writer, prefix, srcPa
 	return nil
 }
 
-func (e *JobExecutor) copyFileFromReader(file string, reader io.Reader) error {
+func (e *JobExecutor) copyFileFromReader(file string, mode os.FileMode, reader io.Reader) error {
 	f, err := os.Create(file)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	if _, err := io.Copy(f, reader); err != nil {
+		return err
+	}
+	if err := f.Chmod(mode); err != nil {
 		return err
 	}
 	return nil

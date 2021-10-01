@@ -184,10 +184,16 @@ func (j *Job) Run(ctx context.Context) (e error) {
 		}
 	}()
 
-	if err := j.wait(ctx); err != nil {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- j.wait(ctx)
+	}()
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-errCh:
 		return err
 	}
-
 	return nil
 }
 
@@ -259,9 +265,6 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 				// In this case, we should stop watch loop, so return instantly.
 				return nil
 			}
-			if ctx.Err() != nil && pod.Status.Phase != corev1.PodPending {
-				return nil
-			}
 			if j.preInit.needsToRun(pod.Status) {
 				if err := j.preInit.run(pod); err != nil {
 					return err
@@ -280,6 +283,12 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 			}
 			switch pod.Status.Phase {
 			case corev1.PodRunning:
+				if j.preInit != nil && !j.preInit.done {
+					return fmt.Errorf("job: preinit step wasn't called but changed pod phase to running")
+				}
+				if j.jobInit != nil && !j.jobInit.done {
+					return fmt.Errorf("job: init containers hook wasn't called but changed pod phase to running")
+				}
 				once.Do(func() {
 					eg.Go(func() error {
 						if err := j.logStreamInitContainers(ctx, pod); err != nil {
