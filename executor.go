@@ -300,10 +300,10 @@ func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecution
 type JobExecutionHandler func([]*JobExecutor) error
 
 func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler) error {
-	ctx, cancel := context.WithCancel(ctx)
+	childCtx, cancel := context.WithCancel(ctx)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- j.runWithExecutionHandler(ctx, cancel, handler)
+		errCh <- j.runWithExecutionHandler(childCtx, cancel, handler)
 	}()
 	select {
 	case <-ctx.Done():
