@@ -160,7 +160,7 @@ func (e *JobExecutor) ExecPrepareCommand(cmd []string) ([]byte, error) {
 
 	out, err := e.execWithRetry(cmd)
 	if err != nil {
-		return out, &FailedJob{Pod: e.Pod, Reason: err}
+		return out, err
 	}
 	return out, nil
 }
