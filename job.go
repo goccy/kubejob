@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 	batchv1 "k8s.io/api/batch/v1"
@@ -71,6 +72,7 @@ type Job struct {
 	podRunningCallback       func(*corev1.Pod) error
 	preInit                  *preInit
 	jobInit                  *jobInit
+	pendingTimeout           *time.Duration
 }
 
 type ContainerLogger func(*ContainerLog)
@@ -81,6 +83,12 @@ type ContainerLog struct {
 	Container  corev1.Container
 	Log        string
 	IsFinished bool
+}
+
+// SetPendingPhaseTimeout set the timeout when the process in the init container is finished
+// but it does not switch to the Running phase ( PodInitializing state for a long time ).
+func (j *Job) SetPendingPhaseTimeout(timeout time.Duration) {
+	j.pendingTimeout = &timeout
 }
 
 func (j *Job) SetLogLevel(level LogLevel) {
@@ -231,6 +239,14 @@ func (j *Job) logf(format string, args ...interface{}) {
 	}
 }
 
+func (j *Job) getPod(ctx context.Context, name string) (*corev1.Pod, error) {
+	pod, err := j.podClient.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("job: failed to get pod by name %s: %w", name, err)
+	}
+	return pod, nil
+}
+
 func (j *Job) wait(ctx context.Context) error {
 	watcher, err := j.podClient.Watch(ctx, metav1.ListOptions{
 		LabelSelector: j.labelSelector(),
@@ -251,10 +267,62 @@ func (j *Job) labelSelector() string {
 	return fmt.Sprintf("%s=%s", SelectorLabel, j.Spec.Template.Labels[SelectorLabel])
 }
 
+func (j *Job) isPodInitializing(pod *corev1.Pod) bool {
+	const waitingReasonPodInitializing = "PodInitializing"
+
+	if pod.Status.Phase != corev1.PodPending {
+		return false
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.State.Waiting != nil {
+			if status.State.Waiting.Reason == waitingReasonPodInitializing {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (j *Job) watchPodPendingPhase(ctx context.Context, name string) error {
+	if j.pendingTimeout == nil {
+		return nil
+	}
+
+	var (
+		onceForPodInitializing sync.Once
+		startedPodInitializing time.Time
+	)
+	for {
+		time.Sleep(1 * time.Second)
+		curPod, err := j.getPod(ctx, name)
+		if err != nil {
+			return err
+		}
+		if curPod == nil {
+			continue
+		}
+		switch curPod.Status.Phase {
+		case corev1.PodRunning, corev1.PodSucceeded, corev1.PodFailed:
+			return nil
+		}
+		if j.isPodInitializing(curPod) {
+			onceForPodInitializing.Do(func() {
+				startedPodInitializing = time.Now()
+			})
+			elapsedTime := time.Since(startedPodInitializing)
+			if *j.pendingTimeout < elapsedTime {
+				return errPendingPhase(startedPodInitializing, *j.pendingTimeout)
+			}
+		}
+	}
+	return nil
+}
+
 func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) {
 	var (
-		eg   errgroup.Group
-		once sync.Once
+		eg                    errgroup.Group
+		once                  sync.Once
+		onceWatchPendingPhase sync.Once
 	)
 	eg.Go(func() error {
 		var phase corev1.PodPhase
@@ -265,6 +333,12 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 				// In this case, we should stop watch loop, so return instantly.
 				return nil
 			}
+			onceWatchPendingPhase.Do(func() {
+				name := pod.Name
+				eg.Go(func() error {
+					return j.watchPodPendingPhase(ctx, name)
+				})
+			})
 			if j.preInit.needsToRun(pod.Status) {
 				if err := j.preInit.run(pod); err != nil {
 					return err

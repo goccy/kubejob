@@ -354,11 +354,9 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 				if executor.err != nil {
 					existsErrContainer = true
 				}
-				if executor.IsRunning() {
-					if err := executor.Stop(); err != nil {
-						j.logWarn("failed to stop %s", err)
-						forceStop = true
-					}
+				if err := executor.Stop(); err != nil {
+					j.logWarn("failed to stop %s", err)
+					forceStop = true
 				}
 			}
 			if forceStop {
