@@ -3,6 +3,7 @@ package kubejob
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	executil "k8s.io/client-go/util/exec"
@@ -189,6 +190,18 @@ func (e *JobStopContainerError) Error() string {
 	return fmt.Sprintf("job: failed to stop container. %s", e.Reason)
 }
 
+type PendingPhaseTimeoutError struct {
+	Timeout   time.Duration
+	StartedAt time.Time
+}
+
+func (e *PendingPhaseTimeoutError) Error() string {
+	return fmt.Sprintf(
+		"job: failed to move running phase. %s has passed while in the PodInitializing state",
+		e.Timeout,
+	)
+}
+
 type CopyError struct {
 	SrcPath string
 	DstPath string
@@ -197,6 +210,13 @@ type CopyError struct {
 
 func (e *CopyError) Error() string {
 	return fmt.Sprintf("job: failed to copy from %s to %s. %s", e.SrcPath, e.DstPath, e.Err)
+}
+
+func errPendingPhase(startedAt time.Time, timeout time.Duration) error {
+	return &PendingPhaseTimeoutError{
+		StartedAt: startedAt,
+		Timeout:   timeout,
+	}
 }
 
 func errCopy(srcPath, dstPath string, err error) error {

@@ -160,7 +160,7 @@ func (e *JobExecutor) ExecPrepareCommand(cmd []string) ([]byte, error) {
 
 	out, err := e.execWithRetry(cmd)
 	if err != nil {
-		return out, &FailedJob{Pod: e.Pod, Reason: err}
+		return out, err
 	}
 	return out, nil
 }
@@ -354,11 +354,9 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 				if executor.err != nil {
 					existsErrContainer = true
 				}
-				if executor.IsRunning() {
-					if err := executor.Stop(); err != nil {
-						j.logWarn("failed to stop %s", err)
-						forceStop = true
-					}
+				if err := executor.Stop(); err != nil {
+					j.logWarn("failed to stop %s", err)
+					forceStop = true
 				}
 			}
 			if forceStop {
