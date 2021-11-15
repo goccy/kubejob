@@ -40,7 +40,7 @@ func (e *JobExecutor) normalizeCmd(cmd []string) string {
 		c = strings.Trim(c, whiteSpace)
 		if strings.Contains(c, whiteSpace) {
 			// contains multiple command
-			vars = append(vars, fmt.Sprintf("VAR%d=$(cat <<-EOS\n%s\nEOS\n)", idx, c))
+			vars = append(vars, fmt.Sprintf("VAR%d=$(cat <<-'EOS'\n%s\nEOS\n)", idx, c))
 			normalizedCmd = append(normalizedCmd, fmt.Sprintf(`"$VAR%d"`, idx))
 		} else {
 			normalizedCmd = append(normalizedCmd, c)
