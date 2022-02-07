@@ -140,11 +140,20 @@ func (e *JobExecutor) copyFromPodWithRetry(srcPath, dstPath string) error {
 	return err
 }
 
+const (
+	errDialingBackendEOF = "error dialing backend: EOF"
+)
+
 func (e *JobExecutor) isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
 	if err == io.ErrUnexpectedEOF {
+		return true
+	}
+
+	// https://github.com/goccy/kubetest/issues/63
+	if strings.Contains(err.Error(), errDialingBackendEOF) {
 		return true
 	}
 	return false
