@@ -199,6 +199,23 @@ func (e *JobExecutor) ExecAsync() error {
 	return nil
 }
 
+func (e *JobExecutor) TerminationLog(log string) error {
+	if !e.IsRunning() {
+		return fmt.Errorf("job: must be executed command before sending termination log")
+	}
+	if e.stopped {
+		return fmt.Errorf("job: failed to send termination log because container has already been stopped")
+	}
+	termMessagePath := e.Container.TerminationMessagePath
+	if termMessagePath == "" {
+		termMessagePath = corev1.TerminationMessagePathDefault
+	}
+	if _, err := e.execWithRetry([]string{"echo", log, ">", termMessagePath}); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (e *JobExecutor) Stop() error {
 	if e.stopped {
 		return nil
