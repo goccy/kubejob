@@ -318,6 +318,15 @@ func (j *Job) watchPodPendingPhase(ctx context.Context, name string) error {
 	return nil
 }
 
+func (j *Job) isReadyAllContainers(status corev1.PodStatus) bool {
+	for _, s := range status.ContainerStatuses {
+		if !s.Ready {
+			return false
+		}
+	}
+	return true
+}
+
 func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) {
 	var (
 		eg                    errgroup.Group
@@ -362,6 +371,9 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 				}
 				if j.jobInit != nil && !j.jobInit.done {
 					return fmt.Errorf("job: init containers hook wasn't called but changed pod phase to running")
+				}
+				if !j.isReadyAllContainers(pod.Status) {
+					continue
 				}
 				once.Do(func() {
 					eg.Go(func() error {
