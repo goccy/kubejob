@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fujiwara/shapeio"
 	"github.com/lestrrat-go/backoff"
 	core "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -257,7 +258,12 @@ func (e *JobExecutor) trimShortcutPath(p string) string {
 }
 
 func (e *JobExecutor) writeWithTar(w io.Writer, srcPath, dstPath string) error {
-	writer := tar.NewWriter(w)
+	const rateLimit = 5 * 1024 * 1024 // 5MB
+
+	rateLimitedWriter := shapeio.NewWriter(w)
+	rateLimitedWriter.SetRateLimit(5 * 1024 * 1024)
+
+	writer := tar.NewWriter(rateLimitedWriter)
 	defer writer.Close()
 
 	srcPath = path.Clean(srcPath)
