@@ -261,7 +261,7 @@ func (e *JobExecutor) writeWithTar(w io.Writer, srcPath, dstPath string) error {
 	const rateLimit = 5 * 1024 * 1024 // 5MB
 
 	rateLimitedWriter := shapeio.NewWriter(w)
-	rateLimitedWriter.SetRateLimit(5 * 1024 * 1024)
+	rateLimitedWriter.SetRateLimit(rateLimit)
 
 	writer := tar.NewWriter(rateLimitedWriter)
 	defer writer.Close()
