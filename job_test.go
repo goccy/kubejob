@@ -25,10 +25,7 @@ var (
 )
 
 func init() {
-	c, err := rest.InClusterConfig()
-	if err != nil {
-		panic(err)
-	}
+	c, _ := rest.InClusterConfig()
 	cfg = c
 }
 
@@ -240,7 +237,10 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 					t.Fatalf("failed to build job: %+v", err)
 				}
 				if test.useAgent {
-					agentConfig := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+					agentConfig, err := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+					if err != nil {
+						t.Fatal(err)
+					}
 					job.UseAgent(agentConfig)
 				}
 				if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
@@ -282,7 +282,10 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 					t.Fatalf("failed to build job: %+v", err)
 				}
 				if test.useAgent {
-					agentConfig := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+					agentConfig, err := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+					if err != nil {
+						t.Fatal(err)
+					}
 					job.UseAgent(agentConfig)
 				}
 				if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
@@ -802,7 +805,10 @@ func Test_RunnerWithAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to build job: %+v", err)
 	}
-	agentConfig := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+	agentConfig, err := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	job.PreInit(apiv1.Container{
 		Name:            "preinit",
 		Image:           "kubejob:latest",
@@ -967,7 +973,10 @@ ln -s /tmp/symfile /tmp/artifacts/symfile
 }
 
 func Test_CopyWithAgent(t *testing.T) {
-	agentConfig := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+	agentConfig, err := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Run("copyFromPod", func(t *testing.T) {
 		dir, err := os.MkdirTemp("", "kubejob")
 		if err != nil {

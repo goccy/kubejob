@@ -16,11 +16,44 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func TestAgentServer(t *testing.T) {
-	const (
-		grpcPort        = 5000
-		healthCheckPort = 6000
+const (
+	grpcPort        = 5000
+	healthCheckPort = 6000
+)
+
+func createGRPCConn(t *testing.T, signedToken string) grpc.ClientConnInterface {
+	t.Helper()
+	conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", grpcPort),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
+		grpc.WithUnaryInterceptor(kubejob.AgentAuthUnaryInterceptor(signedToken)),
+		grpc.WithStreamInterceptor(kubejob.AgentAuthStreamInterceptor(signedToken)),
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conn
+}
+
+func TestAgentServer(t *testing.T) {
+	agentConfig, err := kubejob.NewAgentConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := agentConfig.IssueJWT()
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKeyEnv := agentConfig.PublicKeyEnv()
+	if err := os.Setenv(publicKeyEnv.Name, publicKeyEnv.Value); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Unsetenv(publicKeyEnv.Name); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	signedToken := string(token)
 	t.Run("finish", func(t *testing.T) {
 		agentServer := kubejob.NewAgentServer(grpcPort, healthCheckPort)
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
@@ -35,15 +68,7 @@ func TestAgentServer(t *testing.T) {
 			done <- struct{}{}
 		}()
 
-		conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", grpcPort),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		agentClient := agent.NewAgentClient(conn)
+		agentClient := agent.NewAgentClient(createGRPCConn(t, signedToken))
 		if _, err := agentClient.Finish(context.Background(), &agent.FinishRequest{}); err != nil {
 			t.Fatal(err)
 		}
@@ -69,15 +94,7 @@ func TestAgentServer(t *testing.T) {
 			done <- struct{}{}
 		}()
 
-		conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", grpcPort),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		agentClient := agent.NewAgentClient(conn)
+		agentClient := agent.NewAgentClient(createGRPCConn(t, signedToken))
 
 		for _, test := range []struct {
 			name             string
@@ -166,14 +183,6 @@ func TestAgentServer(t *testing.T) {
 			done <- struct{}{}
 		}()
 
-		conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", grpcPort),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-
 		// create temporary file to copy
 		srcFile, err := os.CreateTemp("", "repo")
 		if err != nil {
@@ -191,7 +200,7 @@ func TestAgentServer(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		agentClient := agent.NewAgentClient(conn)
+		agentClient := agent.NewAgentClient(createGRPCConn(t, signedToken))
 		stream, err := agentClient.CopyFrom(context.Background(), &agent.CopyFromRequest{
 			Path: srcFile.Name(),
 		})
@@ -262,14 +271,6 @@ func TestAgentServer(t *testing.T) {
 			done <- struct{}{}
 		}()
 
-		conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", grpcPort),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-
 		// create temporary file to copy
 		srcFile, err := os.CreateTemp("", "repo")
 		if err != nil {
@@ -288,7 +289,7 @@ func TestAgentServer(t *testing.T) {
 		}
 
 		dstFilePath := fmt.Sprintf("%s-copied", srcFile.Name())
-		agentClient := agent.NewAgentClient(conn)
+		agentClient := agent.NewAgentClient(createGRPCConn(t, signedToken))
 		stream, err := agentClient.CopyTo(context.Background())
 		if err != nil {
 			t.Fatal(err)

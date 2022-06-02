@@ -9,6 +9,9 @@ import (
 // PreInit can define the process you want to execute before the process of init container specified at the time of starting Job.
 // It is mainly intended to be used when you use `(*JobExecutor).CopyToFile` to copy an arbitrary file to pod before init processing.
 func (j *Job) PreInit(c corev1.Container, cb func(exec *JobExecutor) error, agentCfg *AgentConfig) {
+	if agentCfg != nil {
+		c.Env = append(c.Env, agentCfg.PublicKeyEnv())
+	}
 	j.preInit = &preInit{
 		container: jobTemplateCommandContainer(c, agentCfg),
 		callback:  cb,

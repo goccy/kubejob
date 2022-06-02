@@ -17,14 +17,16 @@ type AgentClient struct {
 	client    agent.AgentClient
 }
 
-func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16) (*AgentClient, error) {
+func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, signedToken string) (*AgentClient, error) {
 	ipAddr := agentServerPod.Status.PodIP
 	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", ipAddr, listenPort),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
+		grpc.WithUnaryInterceptor(agentAuthUnaryInterceptor(signedToken)),
+		grpc.WithStreamInterceptor(agentAuthStreamInterceptor(signedToken)),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("job: failed to dial gRPC: %w", err)
+		return nil, fmt.Errorf("job: failed to dial grpc: %w", err)
 	}
 	client := agent.NewAgentClient(conn)
 	return &AgentClient{

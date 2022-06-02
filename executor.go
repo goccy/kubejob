@@ -37,7 +37,11 @@ func (e *JobExecutor) enabledAgent() bool {
 func (e *JobExecutor) setPod(pod *corev1.Pod) error {
 	e.Pod = pod
 	if e.enabledAgent() {
-		client, err := NewAgentClient(pod, e.agentCfg.grpcPort)
+		signedToken, err := e.agentCfg.IssueJWT()
+		if err != nil {
+			return err
+		}
+		client, err := NewAgentClient(pod, e.agentCfg.grpcPort, string(signedToken))
 		if err != nil {
 			return fmt.Errorf("failed to create agent client: %w", err)
 		}
@@ -363,6 +367,9 @@ func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecution
 			job:          j,
 			agentCfg:     agentCfg,
 		})
+		if agentCfg != nil {
+			c.Env = append(c.Env, agentCfg.PublicKeyEnv())
+		}
 		jobInit.containers = append(jobInit.containers, jobTemplateCommandContainer(c, agentCfg))
 	}
 	j.jobInit = jobInit
@@ -412,6 +419,10 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 		}
 		if j.agentCfg != nil {
 			replaceCommandByAgentConfig(&j.Job.Spec.Template.Spec.Containers[idx], j.agentCfg)
+			j.Job.Spec.Template.Spec.Containers[idx].Env = append(
+				j.Job.Spec.Template.Spec.Containers[idx].Env,
+				j.agentCfg.PublicKeyEnv(),
+			)
 		} else {
 			replaceCommandByJobTemplate(&j.Job.Spec.Template.Spec.Containers[idx])
 		}

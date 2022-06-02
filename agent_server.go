@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/goccy/kubejob/agent"
+	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -42,7 +43,7 @@ func (s *AgentServer) Exec(ctx context.Context, req *agent.ExecRequest) (*agent.
 	for _, e := range req.Env {
 		env = append(env, fmt.Sprintf("%s=%s", e.Name, e.Value))
 	}
-	log.Printf("exec command: %s. env: %s", strings.Join(req.Command, " "), strings.Join(env, ";"))
+	log.Printf("exec command: %s", strings.Join(req.Command, " "))
 	var buf bytes.Buffer
 	w := io.MultiWriter(&buf, os.Stdout)
 	cmd := exec.Command(req.Command[0], req.Command[1:]...)
@@ -147,7 +148,10 @@ func (s *AgentServer) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to listen gRPC port %d: %w", s.grpcPort, err)
 	}
 
-	server := grpc.NewServer()
+	server := grpc.NewServer(
+		grpc.StreamInterceptor(grpc_auth.StreamServerInterceptor(authFunc)),
+		grpc.UnaryInterceptor(grpc_auth.UnaryServerInterceptor(authFunc)),
+	)
 	agent.RegisterAgentServer(server, s)
 
 	reflection.Register(server)
@@ -171,4 +175,15 @@ func (s *AgentServer) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func authFunc(ctx context.Context) (context.Context, error) {
+	signed, err := grpc_auth.AuthFromMD(ctx, "Bearer")
+	if err != nil {
+		return ctx, fmt.Errorf("failed to get authorization token: %w", err)
+	}
+	if _, err := authorizeAgentJWT([]byte(signed)); err != nil {
+		return ctx, err
+	}
+	return ctx, nil
 }
