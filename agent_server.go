@@ -1,0 +1,174 @@
+package kubejob
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/goccy/kubejob/agent"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
+)
+
+var _ agent.AgentServer = &AgentServer{}
+
+const defaultStreamFileChunkSize = 1024 // 1KB
+
+type AgentServer struct {
+	grpcPort        uint16
+	healthCheckPort uint16
+	stopCh          chan struct{}
+}
+
+func NewAgentServer(grpcPort, healthCheckPort uint16) *AgentServer {
+	return &AgentServer{
+		grpcPort:        grpcPort,
+		healthCheckPort: healthCheckPort,
+		stopCh:          make(chan struct{}),
+	}
+}
+
+func (s *AgentServer) Exec(ctx context.Context, req *agent.ExecRequest) (*agent.ExecResponse, error) {
+	log.Println("received exec request")
+	env := os.Environ()
+	for _, e := range req.Env {
+		env = append(env, fmt.Sprintf("%s=%s", e.Name, e.Value))
+	}
+	log.Printf("exec command: %s. env: %s", strings.Join(req.Command, " "), strings.Join(env, ";"))
+	var buf bytes.Buffer
+	w := io.MultiWriter(&buf, os.Stdout)
+	cmd := exec.Command(req.Command[0], req.Command[1:]...)
+	cmd.Stdout = w
+	cmd.Stderr = w
+	cmd.Env = env
+	var errMessage string
+	start := time.Now()
+	if err := cmd.Run(); err != nil {
+		errMessage = err.Error()
+	}
+	elapsedTime := time.Since(start)
+	log.Printf("elapsed time: %s", elapsedTime)
+	return &agent.ExecResponse{
+		Output:         buf.String(),
+		Success:        cmd.ProcessState.Success(),
+		ExitCode:       int32(cmd.ProcessState.ExitCode()),
+		ErrorMessage:   errMessage,
+		ElapsedTimeSec: int64(elapsedTime.Seconds()),
+	}, nil
+}
+
+func (s *AgentServer) CopyFrom(req *agent.CopyFromRequest, stream agent.Agent_CopyFromServer) error {
+	log.Println("received copyFrom request")
+	f, err := os.Open(req.Path)
+	if err != nil {
+		return fmt.Errorf("failed to open %s: %w", req.Path, err)
+	}
+	defer f.Close()
+	buf := make([]byte, defaultStreamFileChunkSize)
+	for {
+		n, err := f.Read(buf)
+		if err == io.EOF {
+			if n > 0 {
+				return fmt.Errorf("failed to send buffer length %d", n)
+			}
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", req.Path, err)
+		}
+		if err := stream.Send(&agent.CopyFromResponse{
+			Data: buf[:n],
+		}); err != nil {
+			return fmt.Errorf("failed to send file data with grpc stream: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *AgentServer) CopyTo(stream agent.Agent_CopyToServer) error {
+	log.Println("received copyTo request")
+	copyToResponse, err := stream.Recv()
+	path := copyToResponse.GetPath()
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("failed to create copy target file %s: %w", path, err)
+	}
+	defer f.Close()
+
+	copiedLength := int64(0)
+	for {
+		copyToResponse, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to copy file. current copied buffer size is %d: %w", copiedLength, err)
+		}
+		n, err := f.Write(copyToResponse.Data)
+		if err != nil {
+			return fmt.Errorf("failed to write data to file: %w", err)
+		}
+		copiedLength += int64(n)
+	}
+	if err := stream.Send(&agent.CopyToResponse{CopiedLength: copiedLength}); err != nil {
+		return fmt.Errorf("failed to send CopyToResponse: %w", err)
+	}
+	return nil
+}
+
+func (s *AgentServer) Finish(ctx context.Context, req *agent.FinishRequest) (*agent.FinishResponse, error) {
+	log.Println("received finish request")
+	defer func() {
+		s.stopCh <- struct{}{}
+	}()
+	return &agent.FinishResponse{}, nil
+}
+
+func (s *AgentServer) Run(ctx context.Context) error {
+	healthCheckAddr := fmt.Sprintf(":%d", s.healthCheckPort)
+	grpcAddr := fmt.Sprintf(":%d", s.grpcPort)
+
+	go func() {
+		_ = http.ListenAndServe(healthCheckAddr, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("ok"))
+		}))
+	}()
+
+	listenPort, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		return fmt.Errorf("failed to listen gRPC port %d: %w", s.grpcPort, err)
+	}
+
+	server := grpc.NewServer()
+	agent.RegisterAgentServer(server, s)
+
+	reflection.Register(server)
+
+	log.Println("start agent")
+	done := make(chan struct{})
+	go func() {
+		server.Serve(listenPort)
+		done <- struct{}{}
+	}()
+
+	select {
+	case <-s.stopCh:
+		server.GracefulStop()
+		select {
+		case <-done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}

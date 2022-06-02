@@ -29,8 +29,12 @@ test-cluster: $(KIND)
 delete-cluster: $(KIND)
 	$(KIND) delete clusters $(CLUSTER_NAME)
 
-deploy: test-cluster
+deploy: test-cluster deploy/image
 	kubectl apply -f testdata/config/manifest.yaml
+
+deploy/image:
+	docker build --progress plain -f Dockerfile --target agent . -t kubejob:latest
+	kind load docker-image --name $(CLUSTER_NAME) kubejob:latest
 
 wait:
 	{ \
@@ -69,3 +73,8 @@ test-run:
 		sleep 1; \
 	done; \
 	}
+
+generate: proto-gen
+
+proto-gen:
+	protoc ./agent/agent.proto --go_out=plugins=grpc:.

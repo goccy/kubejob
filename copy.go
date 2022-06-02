@@ -21,11 +21,17 @@ import (
 
 // CopyToPod copy directory or files to specified path on Pod.
 func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
+	if e.stopped {
+		return fmt.Errorf("job: failed to copy to pod. pod is already stopped")
+	}
 	if len(srcPath) == 0 || len(dstPath) == 0 {
 		return errCopyWithEmptyPath(srcPath, dstPath)
 	}
 	if _, err := os.Stat(srcPath); err != nil {
 		return errCopy(srcPath, dstPath, fmt.Errorf("%s doesn't exist in local filesystem", srcPath))
+	}
+	if e.enabledAgent() {
+		return e.agentClient.CopyTo(context.Background(), srcPath, dstPath)
 	}
 
 	// trim slash as the last character
@@ -98,6 +104,12 @@ func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
 
 // CopyFromPod copy directory or files from specified path on Pod.
 func (e *JobExecutor) CopyFromPod(srcPath, dstPath string) error {
+	if e.stopped {
+		return fmt.Errorf("job: failed to copy from pod. pod is already stopped")
+	}
+	if e.enabledAgent() {
+		return e.agentClient.CopyFrom(context.Background(), srcPath, dstPath)
+	}
 	return e.copyFromPodWithRetry(srcPath, dstPath)
 }
 

@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package agent;
+
+message Env {
+  string name = 1;
+  string value = 2;
+}
+
+message ExecRequest {
+  repeated string command = 1;
+  repeated Env env = 2;
+}
+
+message ExecResponse {
+  string output = 1;
+  bool success = 2;
+  int32 exit_code = 3;
+  string error_message = 4;
+  int64 elapsed_time_sec = 5;
+}
+
+message CopyToRequest {
+  string path = 1;
+  bytes data = 2;
+}
+
+message CopyToResponse {
+  int64 copied_length = 1;
+}
+
+message CopyFromRequest {
+  string path = 1;
+}
+
+message CopyFromResponse {
+  bytes data = 1;
+}
+
+message FinishRequest {
+}
+
+message FinishResponse {
+}
+
+service Agent {
+  rpc Exec(ExecRequest) returns (ExecResponse);
+  rpc CopyFrom(CopyFromRequest) returns (stream CopyFromResponse);
+  rpc CopyTo(stream CopyToRequest) returns (stream CopyToResponse);
+  rpc Finish(FinishRequest) returns (FinishResponse);
+}
