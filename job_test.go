@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	goImageName = "golang:1.17"
+	goImageName = "golang:1.17-stretch"
 )
 
 var (

@@ -424,6 +424,7 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 			if err != nil {
 				return err
 			}
+			agentPort = port
 			replaceCommandByAgentCommand(&j.Job.Spec.Template.Spec.Containers[idx], j.agentCfg.path, port)
 			j.Job.Spec.Template.Spec.Containers[idx].Env = append(
 				j.Job.Spec.Template.Spec.Containers[idx].Env,

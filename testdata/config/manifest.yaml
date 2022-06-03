@@ -69,7 +69,7 @@ spec:
       serviceAccountName: kubejob
       containers:
         - name: kubejob
-          image: golang:1.16.5-buster
+          image: golang:1.17-stretch
           workingDir: /go/src/kubejob
           command:
             - tail
