@@ -137,6 +137,30 @@ if err := job.RunWithExecutionHandler(context.Background(), func(executors []*ku
 })
 ```
 
+## Execution with kubejob-agent
+
+Normally, copying and executing commands using JobExecutor is performed using the shell or tar command in the container image and using the Kubernetes API ( `pods/exec` ).
+However, if you need to copy large files or run a large number of commands and don't want to overload the Kubernetes API, or if you don't have a shell or tar command in your container image, you can use the `kubejob-agent` method.
+
+kubejob-agent is a CLI tool that can be installed by the following methods.
+
+```console
+$ go install github.com/goccy/kubejob/cmd/kubejob-agent
+```
+
+Include this tool in your container image, create `kubejob.AgentConfig` with the path where `kubejob-agent` is located, and give it to `kubejob.Job` as follows:
+
+```go
+agentConfig, err := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+if err != nil {
+  return err
+}
+job.UseAgent(agentConfig)
+```
+
+This will switch from communication using the Kubernetes API to gRPC-based communication with kubejob-agent.
+Communication with `kubejob-agent` is performed using JWT issued using the RSA Key issued each time Kubernetes Job is started, so requests cannot be sent directly to the container from other processes.
+
 # Requirements
 
 ## Role
@@ -175,7 +199,7 @@ rules:
     resources:
       - pods/exec
     verbs:
-      - create # required when using kubejob.JobExecutor
+      - create # required when using kubejob.JobExecutor without kubejob-agent
 ```
 
 # Tools

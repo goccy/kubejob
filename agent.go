@@ -8,12 +8,11 @@ import (
 	"os"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
-
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	corev1 "k8s.io/api/core/v1"
 )
 
