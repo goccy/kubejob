@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -113,6 +114,10 @@ func (s *AgentServer) CopyTo(stream agent.Agent_CopyToServer) error {
 func (s *AgentServer) copyTo(stream agent.Agent_CopyToServer) (int64, error) {
 	copyToResponse, err := stream.Recv()
 	path := copyToResponse.GetPath()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return 0, fmt.Errorf("failed to create directory %s: %w", filepath.Dir(path), err)
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create copy target file %s: %w", path, err)

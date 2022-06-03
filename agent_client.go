@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/goccy/kubejob/agent"
 	"google.golang.org/grpc"
@@ -78,6 +79,9 @@ func (c *AgentClient) CopyFrom(ctx context.Context, srcPath, dstPath string) err
 		return fmt.Errorf("job: failed to create grpc stream to copy from pod: %w", err)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+		return fmt.Errorf("job: failed to create directory %s: %w", filepath.Dir(dstPath), err)
+	}
 	f, err := os.Create(dstPath)
 	if err != nil {
 		return fmt.Errorf("job: failed to create file %s to copy: %w", dstPath, err)
