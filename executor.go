@@ -20,6 +20,7 @@ type JobExecutor struct {
 	ContainerIdx int
 	Pod          *corev1.Pod
 	agentCfg     *AgentConfig
+	agentPort    uint16
 	agentClient  *AgentClient
 	command      []string
 	args         []string
@@ -41,7 +42,12 @@ func (e *JobExecutor) setPod(pod *corev1.Pod) error {
 		if err != nil {
 			return err
 		}
-		client, err := NewAgentClient(pod, e.agentCfg.grpcPort, string(signedToken))
+		client, err := NewAgentClient(
+			pod,
+			e.agentPort,
+			e.Container.WorkingDir,
+			string(signedToken),
+		)
 		if err != nil {
 			return fmt.Errorf("failed to create agent client: %w", err)
 		}
@@ -359,6 +365,15 @@ func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecution
 	}
 	for idx, c := range j.Job.Spec.Template.Spec.InitContainers {
 		c := c
+		var agentPort uint16
+		if agentCfg != nil {
+			port, err := agentCfg.NewAllocatedPort()
+			if err != nil {
+				return err
+			}
+			agentPort = port
+			c.Env = append(c.Env, agentCfg.PublicKeyEnv())
+		}
 		jobInit.executors = append(jobInit.executors, &JobExecutor{
 			Container:    c,
 			ContainerIdx: idx,
@@ -366,11 +381,10 @@ func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecution
 			args:         c.Args,
 			job:          j,
 			agentCfg:     agentCfg,
+			agentPort:    agentPort,
 		})
-		if agentCfg != nil {
-			c.Env = append(c.Env, agentCfg.PublicKeyEnv())
-		}
-		jobInit.containers = append(jobInit.containers, jobTemplateCommandContainer(c, agentCfg))
+
+		jobInit.containers = append(jobInit.containers, jobTemplateCommandContainer(c, agentCfg, agentPort))
 	}
 	j.jobInit = jobInit
 	return nil
@@ -409,6 +423,21 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 		container := j.Job.Spec.Template.Spec.Containers[idx]
 		command := container.Command
 		args := container.Args
+		var agentPort uint16
+		if j.agentCfg != nil {
+			port, err := j.agentCfg.NewAllocatedPort()
+			if err != nil {
+				return err
+			}
+			agentPort = port
+			replaceCommandByAgentCommand(&j.Job.Spec.Template.Spec.Containers[idx], j.agentCfg.path, port)
+			j.Job.Spec.Template.Spec.Containers[idx].Env = append(
+				j.Job.Spec.Template.Spec.Containers[idx].Env,
+				j.agentCfg.PublicKeyEnv(),
+			)
+		} else {
+			replaceCommandByJobTemplate(&j.Job.Spec.Template.Spec.Containers[idx])
+		}
 		executorMap[container.Name] = &JobExecutor{
 			Container:    container,
 			ContainerIdx: idx,
@@ -416,15 +445,7 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 			args:         args,
 			job:          j,
 			agentCfg:     j.agentCfg,
-		}
-		if j.agentCfg != nil {
-			replaceCommandByAgentConfig(&j.Job.Spec.Template.Spec.Containers[idx], j.agentCfg)
-			j.Job.Spec.Template.Spec.Containers[idx].Env = append(
-				j.Job.Spec.Template.Spec.Containers[idx].Env,
-				j.agentCfg.PublicKeyEnv(),
-			)
-		} else {
-			replaceCommandByJobTemplate(&j.Job.Spec.Template.Spec.Containers[idx])
+			agentPort:    agentPort,
 		}
 	}
 	j.DisableCommandLog()

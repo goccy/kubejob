@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/goccy/kubejob/agent"
 	"google.golang.org/grpc"
@@ -13,11 +14,12 @@ import (
 )
 
 type AgentClient struct {
-	serverPod *corev1.Pod
-	client    agent.AgentClient
+	serverPod  *corev1.Pod
+	workingDir string
+	client     agent.AgentClient
 }
 
-func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, signedToken string) (*AgentClient, error) {
+func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, signedToken string) (*AgentClient, error) {
 	ipAddr := agentServerPod.Status.PodIP
 	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", ipAddr, listenPort),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -30,8 +32,9 @@ func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, signedToken s
 	}
 	client := agent.NewAgentClient(conn)
 	return &AgentClient{
-		serverPod: agentServerPod,
-		client:    client,
+		serverPod:  agentServerPod,
+		workingDir: workingDir,
+		client:     client,
 	}, nil
 }
 
@@ -52,8 +55,9 @@ func (c *AgentClient) Exec(ctx context.Context, command []string, env []corev1.E
 		})
 	}
 	res, err := c.client.Exec(ctx, &agent.ExecRequest{
-		Command: command,
-		Env:     agentEnv,
+		Command:    command,
+		Env:        agentEnv,
+		WorkingDir: c.workingDir,
 	})
 	if err != nil {
 		return nil, err
@@ -68,6 +72,17 @@ func (c *AgentClient) Exec(ctx context.Context, command []string, env []corev1.E
 }
 
 func (c *AgentClient) CopyFrom(ctx context.Context, srcPath, dstPath string) error {
+	archivedFilePath := fmt.Sprintf("%s.tar", dstPath)
+	if err := c.copyFrom(ctx, srcPath, archivedFilePath); err != nil {
+		return err
+	}
+	if err := extractArchivedFile(archivedFilePath, dstPath); err != nil {
+		return fmt.Errorf("failed to extract file %s: %w", archivedFilePath, err)
+	}
+	return nil
+}
+
+func (c *AgentClient) copyFrom(ctx context.Context, srcPath, dstPath string) error {
 	stream, err := c.client.CopyFrom(ctx, &agent.CopyFromRequest{
 		Path: srcPath,
 	})
@@ -75,6 +90,9 @@ func (c *AgentClient) CopyFrom(ctx context.Context, srcPath, dstPath string) err
 		return fmt.Errorf("job: failed to create grpc stream to copy from pod: %w", err)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+		return fmt.Errorf("job: failed to create directory %s: %w", filepath.Dir(dstPath), err)
+	}
 	f, err := os.Create(dstPath)
 	if err != nil {
 		return fmt.Errorf("job: failed to create file %s to copy: %w", dstPath, err)
@@ -103,14 +121,22 @@ func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error
 	}
 
 	buf := make([]byte, defaultStreamFileChunkSize)
-	f, err := os.Open(srcPath)
+	if _, err := os.Stat(srcPath); err != nil {
+		return fmt.Errorf("job: failed to get status of file %s: %w", srcPath, err)
+	}
+
+	archivedFilePath, err := archivePath(srcPath)
 	if err != nil {
-		return fmt.Errorf("job: failed to open file %s: %w", srcPath, err)
+		return err
+	}
+	f, err := os.Open(archivedFilePath)
+	if err != nil {
+		return fmt.Errorf("job: failed to open archived file %s: %w", archivedFilePath, err)
 	}
 	defer f.Close()
 	finfo, err := f.Stat()
 	if err != nil {
-		return fmt.Errorf("job: failed to get file info %s: %w", srcPath, err)
+		return fmt.Errorf("job: failed to get file info of %s: %w", archivedFilePath, err)
 	}
 	if err := stream.Send(&agent.CopyToRequest{
 		Path: dstPath,
@@ -123,7 +149,7 @@ func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("job: failed to read file %s: %w", srcPath, err)
+			return fmt.Errorf("job: failed to read file %s: %w", archivedFilePath, err)
 		}
 		if err := stream.Send(&agent.CopyToRequest{
 			Data: buf[:n],

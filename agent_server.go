@@ -7,9 +7,9 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,16 +24,14 @@ var _ agent.AgentServer = &AgentServer{}
 const defaultStreamFileChunkSize = 1024 // 1KB
 
 type AgentServer struct {
-	grpcPort        uint16
-	healthCheckPort uint16
-	stopCh          chan struct{}
+	port   uint16
+	stopCh chan struct{}
 }
 
-func NewAgentServer(grpcPort, healthCheckPort uint16) *AgentServer {
+func NewAgentServer(port uint16) *AgentServer {
 	return &AgentServer{
-		grpcPort:        grpcPort,
-		healthCheckPort: healthCheckPort,
-		stopCh:          make(chan struct{}),
+		port:   port,
+		stopCh: make(chan struct{}),
 	}
 }
 
@@ -50,6 +48,7 @@ func (s *AgentServer) Exec(ctx context.Context, req *agent.ExecRequest) (*agent.
 	cmd.Stdout = w
 	cmd.Stderr = w
 	cmd.Env = env
+	cmd.Dir = req.GetWorkingDir()
 	var errMessage string
 	start := time.Now()
 	if err := cmd.Run(); err != nil {
@@ -68,9 +67,20 @@ func (s *AgentServer) Exec(ctx context.Context, req *agent.ExecRequest) (*agent.
 
 func (s *AgentServer) CopyFrom(req *agent.CopyFromRequest, stream agent.Agent_CopyFromServer) error {
 	log.Println("received copyFrom request")
-	f, err := os.Open(req.Path)
+	if err := s.copyFrom(req, stream); err != nil {
+		log.Println(err)
+	}
+	return nil
+}
+
+func (s *AgentServer) copyFrom(req *agent.CopyFromRequest, stream agent.Agent_CopyFromServer) error {
+	archivedFilePath, err := archivePath(req.Path)
 	if err != nil {
-		return fmt.Errorf("failed to open %s: %w", req.Path, err)
+		return err
+	}
+	f, err := os.Open(archivedFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to open %s: %w", archivedFilePath, err)
 	}
 	defer f.Close()
 	buf := make([]byte, defaultStreamFileChunkSize)
@@ -83,7 +93,7 @@ func (s *AgentServer) CopyFrom(req *agent.CopyFromRequest, stream agent.Agent_Co
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("failed to read file %s: %w", req.Path, err)
+			return fmt.Errorf("failed to read file %s: %w", archivedFilePath, err)
 		}
 		if err := stream.Send(&agent.CopyFromResponse{
 			Data: buf[:n],
@@ -97,10 +107,30 @@ func (s *AgentServer) CopyFrom(req *agent.CopyFromRequest, stream agent.Agent_Co
 func (s *AgentServer) CopyTo(stream agent.Agent_CopyToServer) error {
 	log.Println("received copyTo request")
 	copyToResponse, err := stream.Recv()
+	if err != nil {
+		return fmt.Errorf("failed to recv data: %w", err)
+	}
 	path := copyToResponse.GetPath()
+	archivedFilePath := fmt.Sprintf("%s.tar", path)
+	copiedLength, err := s.copyTo(archivedFilePath, stream)
+	if err != nil {
+		log.Printf("copied length %d", copiedLength)
+		log.Println(err)
+		return err
+	}
+	if err := extractArchivedFile(archivedFilePath, path); err != nil {
+		return fmt.Errorf("failed to extract archived file %s: %w", archivedFilePath, err)
+	}
+	return nil
+}
+
+func (s *AgentServer) copyTo(path string, stream agent.Agent_CopyToServer) (int64, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return 0, fmt.Errorf("failed to create directory %s: %w", filepath.Dir(path), err)
+	}
 	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("failed to create copy target file %s: %w", path, err)
+		return 0, fmt.Errorf("failed to create copy target file %s: %w", path, err)
 	}
 	defer f.Close()
 
@@ -111,18 +141,18 @@ func (s *AgentServer) CopyTo(stream agent.Agent_CopyToServer) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("failed to copy file. current copied buffer size is %d: %w", copiedLength, err)
+			return copiedLength, fmt.Errorf("failed to copy file. current copied buffer size is %d: %w", copiedLength, err)
 		}
 		n, err := f.Write(copyToResponse.Data)
 		if err != nil {
-			return fmt.Errorf("failed to write data to file: %w", err)
+			return copiedLength, fmt.Errorf("failed to write data to file: %w", err)
 		}
 		copiedLength += int64(n)
 	}
 	if err := stream.Send(&agent.CopyToResponse{CopiedLength: copiedLength}); err != nil {
-		return fmt.Errorf("failed to send CopyToResponse: %w", err)
+		return copiedLength, fmt.Errorf("failed to send CopyToResponse: %w", err)
 	}
-	return nil
+	return copiedLength, nil
 }
 
 func (s *AgentServer) Finish(ctx context.Context, req *agent.FinishRequest) (*agent.FinishResponse, error) {
@@ -134,18 +164,9 @@ func (s *AgentServer) Finish(ctx context.Context, req *agent.FinishRequest) (*ag
 }
 
 func (s *AgentServer) Run(ctx context.Context) error {
-	healthCheckAddr := fmt.Sprintf(":%d", s.healthCheckPort)
-	grpcAddr := fmt.Sprintf(":%d", s.grpcPort)
-
-	go func() {
-		_ = http.ListenAndServe(healthCheckAddr, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte("ok"))
-		}))
-	}()
-
-	listenPort, err := net.Listen("tcp", grpcAddr)
+	listenPort, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
-		return fmt.Errorf("failed to listen gRPC port %d: %w", s.grpcPort, err)
+		return fmt.Errorf("failed to listen grpc port %d: %w", s.port, err)
 	}
 
 	server := grpc.NewServer(
@@ -165,9 +186,11 @@ func (s *AgentServer) Run(ctx context.Context) error {
 
 	select {
 	case <-s.stopCh:
+		log.Println("stop agent gracefully")
 		server.GracefulStop()
 		select {
 		case <-done:
+			log.Println("stopped agent successfully")
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()

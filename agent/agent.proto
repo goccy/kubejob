@@ -10,6 +10,7 @@ message Env {
 message ExecRequest {
   repeated string command = 1;
   repeated Env env = 2;
+  string working_dir = 3;
 }
 
 message ExecResponse {
