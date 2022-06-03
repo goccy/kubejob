@@ -15,21 +15,20 @@ done
 exit $(cat /tmp/kubejob-status)
 `
 
-func jobTemplateCommandContainer(c corev1.Container, agentCfg *AgentConfig) corev1.Container {
+func jobTemplateCommandContainer(c corev1.Container, agentCfg *AgentConfig, agentPort uint16) corev1.Container {
 	copied := c.DeepCopy()
 	if agentCfg != nil {
-		replaceCommandByAgentConfig(copied, agentCfg)
+		replaceCommandByAgentCommand(copied, agentCfg.path, agentPort)
 	} else {
 		replaceCommandByJobTemplate(copied)
 	}
 	return *copied
 }
 
-func replaceCommandByAgentConfig(c *corev1.Container, cfg *AgentConfig) {
-	c.Command = []string{cfg.path}
+func replaceCommandByAgentCommand(c *corev1.Container, path string, port uint16) {
+	c.Command = []string{path}
 	c.Args = []string{
-		"--grpc-port", fmt.Sprint(cfg.grpcPort),
-		"--health-check-port", fmt.Sprint(cfg.healthCheckPort),
+		"--port", fmt.Sprint(port),
 	}
 }
 

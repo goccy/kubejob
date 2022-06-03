@@ -17,13 +17,12 @@ import (
 )
 
 const (
-	grpcPort        = 5000
-	healthCheckPort = 6000
+	startAllocationPort = 5000
 )
 
 func createGRPCConn(t *testing.T, signedToken string) grpc.ClientConnInterface {
 	t.Helper()
-	conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", grpcPort),
+	conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", startAllocationPort),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithUnaryInterceptor(kubejob.AgentAuthUnaryInterceptor(signedToken)),
@@ -55,7 +54,7 @@ func TestAgentServer(t *testing.T) {
 	}()
 	signedToken := string(token)
 	t.Run("finish", func(t *testing.T) {
-		agentServer := kubejob.NewAgentServer(grpcPort, healthCheckPort)
+		agentServer := kubejob.NewAgentServer(startAllocationPort)
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
@@ -81,7 +80,7 @@ func TestAgentServer(t *testing.T) {
 		}
 	})
 	t.Run("exec", func(t *testing.T) {
-		agentServer := kubejob.NewAgentServer(grpcPort, healthCheckPort)
+		agentServer := kubejob.NewAgentServer(startAllocationPort)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
@@ -170,7 +169,7 @@ func TestAgentServer(t *testing.T) {
 	})
 
 	t.Run("copyFrom", func(t *testing.T) {
-		agentServer := kubejob.NewAgentServer(grpcPort, healthCheckPort)
+		agentServer := kubejob.NewAgentServer(startAllocationPort)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
@@ -258,7 +257,7 @@ func TestAgentServer(t *testing.T) {
 	})
 
 	t.Run("copyTo", func(t *testing.T) {
-		agentServer := kubejob.NewAgentServer(grpcPort, healthCheckPort)
+		agentServer := kubejob.NewAgentServer(startAllocationPort)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 

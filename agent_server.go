@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -24,16 +23,14 @@ var _ agent.AgentServer = &AgentServer{}
 const defaultStreamFileChunkSize = 1024 // 1KB
 
 type AgentServer struct {
-	grpcPort        uint16
-	healthCheckPort uint16
-	stopCh          chan struct{}
+	port   uint16
+	stopCh chan struct{}
 }
 
-func NewAgentServer(grpcPort, healthCheckPort uint16) *AgentServer {
+func NewAgentServer(port uint16) *AgentServer {
 	return &AgentServer{
-		grpcPort:        grpcPort,
-		healthCheckPort: healthCheckPort,
-		stopCh:          make(chan struct{}),
+		port:   port,
+		stopCh: make(chan struct{}),
 	}
 }
 
@@ -151,18 +148,9 @@ func (s *AgentServer) Finish(ctx context.Context, req *agent.FinishRequest) (*ag
 }
 
 func (s *AgentServer) Run(ctx context.Context) error {
-	healthCheckAddr := fmt.Sprintf(":%d", s.healthCheckPort)
-	grpcAddr := fmt.Sprintf(":%d", s.grpcPort)
-
-	go func() {
-		_ = http.ListenAndServe(healthCheckAddr, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte("ok"))
-		}))
-	}()
-
-	listenPort, err := net.Listen("tcp", grpcAddr)
+	listenPort, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
-		return fmt.Errorf("failed to listen gRPC port %d: %w", s.grpcPort, err)
+		return fmt.Errorf("failed to listen grpc port %d: %w", s.port, err)
 	}
 
 	server := grpc.NewServer(
@@ -186,7 +174,7 @@ func (s *AgentServer) Run(ctx context.Context) error {
 		server.GracefulStop()
 		select {
 		case <-done:
-			log.Println("stopped agent successfuly")
+			log.Println("stopped agent successfully")
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()

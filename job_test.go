@@ -489,7 +489,7 @@ func Test_RunnerWithPreInit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to build job: %+v", err)
 	}
-	job.PreInit(apiv1.Container{
+	if err := job.PreInit(apiv1.Container{
 		Name:    "preinit",
 		Image:   goImageName,
 		Command: []string{"sh", "-c"},
@@ -503,7 +503,9 @@ func Test_RunnerWithPreInit(t *testing.T) {
 	}, func(exec *kubejob.JobExecutor) error {
 		_, err := exec.Exec()
 		return err
-	}, nil)
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
 		for _, exec := range executors {
 			out, err := exec.Exec()
@@ -580,7 +582,7 @@ func Test_RunnerWithInitExecutionHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to build job: %+v", err)
 	}
-	job.PreInit(apiv1.Container{
+	if err := job.PreInit(apiv1.Container{
 		Name:    "preinit",
 		Image:   goImageName,
 		Command: []string{"sh", "-c"},
@@ -594,7 +596,9 @@ func Test_RunnerWithInitExecutionHandler(t *testing.T) {
 	}, func(exec *kubejob.JobExecutor) error {
 		_, err := exec.Exec()
 		return err
-	}, nil)
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
 	var calledInitNum int
 	job.SetInitContainerExecutionHandler(func(exec *kubejob.JobExecutor) error {
 		calledInitNum++
@@ -809,7 +813,7 @@ func Test_RunnerWithAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	job.PreInit(apiv1.Container{
+	if err := job.PreInit(apiv1.Container{
 		Name:            "preinit",
 		Image:           "kubejob:latest",
 		ImagePullPolicy: "Never",
@@ -824,7 +828,9 @@ func Test_RunnerWithAgent(t *testing.T) {
 	}, func(exec *kubejob.JobExecutor) error {
 		_, err := exec.Exec()
 		return err
-	}, agentConfig)
+	}, agentConfig); err != nil {
+		t.Fatal(err)
+	}
 	job.UseAgent(agentConfig)
 	if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
 		for _, exec := range executors {

@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
@@ -17,19 +18,21 @@ import (
 )
 
 const (
-	defaultAgentGRPCPort        = 5000
-	defaultAgentHealthCheckPort = 6000
-	rsaBitSize                  = 2048
-	agentJWTIssuer              = "kubejob"
-	agentPublicKeyPEMName       = "AGENT_PUBLIC_KEY_PEM"
+	defaultAgentAllocationStartPort = uint16(5000)
+	maxPortNum                      = uint16(9000)
+	rsaBitSize                      = 2048
+	agentJWTIssuer                  = "kubejob"
+	agentPublicKeyPEMName           = "AGENT_PUBLIC_KEY_PEM"
 )
 
 type AgentConfig struct {
-	path            string
-	grpcPort        uint16
-	healthCheckPort uint16
-	privateKey      *rsa.PrivateKey
-	publicKeyPEM    string
+	path                string
+	allocationStartPort uint16
+	lastAllocatedPort   uint16
+	excludePortMap      map[uint16]struct{}
+	portMapMu           sync.RWMutex
+	privateKey          *rsa.PrivateKey
+	publicKeyPEM        string
 }
 
 func NewAgentConfig(path string) (*AgentConfig, error) {
@@ -42,11 +45,11 @@ func NewAgentConfig(path string) (*AgentConfig, error) {
 		return nil, fmt.Errorf("job: failed to encode public key: %w", err)
 	}
 	return &AgentConfig{
-		path:            path,
-		grpcPort:        defaultAgentGRPCPort,
-		healthCheckPort: defaultAgentHealthCheckPort,
-		privateKey:      privateKey,
-		publicKeyPEM:    string(publicKeyPEM),
+		path:                path,
+		allocationStartPort: defaultAgentAllocationStartPort,
+		excludePortMap:      map[uint16]struct{}{},
+		privateKey:          privateKey,
+		publicKeyPEM:        string(publicKeyPEM),
 	}, nil
 }
 
@@ -72,12 +75,41 @@ func (c *AgentConfig) PublicKeyEnv() corev1.EnvVar {
 	}
 }
 
-func (c *AgentConfig) SetGRPCPort(port uint16) {
-	c.grpcPort = port
+func (c *AgentConfig) SetAllocationStartPort(port uint16) {
+	c.allocationStartPort = port
 }
 
-func (c *AgentConfig) SetHealthCheckPort(port uint16) {
-	c.healthCheckPort = port
+func (c *AgentConfig) SetExcludePorts(ports ...uint16) {
+	c.portMapMu.Lock()
+	defer c.portMapMu.Unlock()
+	for _, port := range ports {
+		c.excludePortMap[port] = struct{}{}
+	}
+}
+
+func (c *AgentConfig) NewAllocatedPort() (uint16, error) {
+	if c.lastAllocatedPort == 0 {
+		c.lastAllocatedPort = c.allocationStartPort
+		return c.allocationStartPort, nil
+	}
+	newPort, err := c.lookupNewPort(c.lastAllocatedPort + 1)
+	if err != nil {
+		return 0, err
+	}
+	c.lastAllocatedPort = newPort
+	return newPort, nil
+}
+
+func (c *AgentConfig) lookupNewPort(base uint16) (uint16, error) {
+	c.portMapMu.RLock()
+	defer c.portMapMu.RUnlock()
+	for i := base; i < maxPortNum; i++ {
+		if _, exists := c.excludePortMap[i]; exists {
+			continue
+		}
+		return i, nil
+	}
+	return 0, fmt.Errorf("failed to find new port number")
 }
 
 func authorizeAgentJWT(signed []byte) (jwt.Token, error) {

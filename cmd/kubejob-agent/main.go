@@ -10,12 +10,11 @@ import (
 )
 
 type option struct {
-	GRPCPort        uint16 `description:"specify grpc port" long:"grpc-port" default:"5000"`
-	HealthCheckPort uint16 `description:"specify health check port" long:"health-check-port" default:"6000"`
+	Port uint16 `description:"specify listening port" long:"port" required:"true"`
 }
 
 func _main(args []string, opt option) error {
-	agentServer := kubejob.NewAgentServer(opt.GRPCPort, opt.HealthCheckPort)
+	agentServer := kubejob.NewAgentServer(opt.Port)
 	return agentServer.Run(context.Background())
 }
 
