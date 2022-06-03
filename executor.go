@@ -42,7 +42,12 @@ func (e *JobExecutor) setPod(pod *corev1.Pod) error {
 		if err != nil {
 			return err
 		}
-		client, err := NewAgentClient(pod, e.agentPort, string(signedToken))
+		client, err := NewAgentClient(
+			pod,
+			e.agentPort,
+			e.Container.WorkingDir,
+			string(signedToken),
+		)
 		if err != nil {
 			return fmt.Errorf("failed to create agent client: %w", err)
 		}

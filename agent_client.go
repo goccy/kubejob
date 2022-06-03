@@ -13,11 +13,12 @@ import (
 )
 
 type AgentClient struct {
-	serverPod *corev1.Pod
-	client    agent.AgentClient
+	serverPod  *corev1.Pod
+	workingDir string
+	client     agent.AgentClient
 }
 
-func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, signedToken string) (*AgentClient, error) {
+func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, signedToken string) (*AgentClient, error) {
 	ipAddr := agentServerPod.Status.PodIP
 	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", ipAddr, listenPort),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -30,8 +31,9 @@ func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, signedToken s
 	}
 	client := agent.NewAgentClient(conn)
 	return &AgentClient{
-		serverPod: agentServerPod,
-		client:    client,
+		serverPod:  agentServerPod,
+		workingDir: workingDir,
+		client:     client,
 	}, nil
 }
 
@@ -52,8 +54,9 @@ func (c *AgentClient) Exec(ctx context.Context, command []string, env []corev1.E
 		})
 	}
 	res, err := c.client.Exec(ctx, &agent.ExecRequest{
-		Command: command,
-		Env:     agentEnv,
+		Command:    command,
+		Env:        agentEnv,
+		WorkingDir: c.workingDir,
 	})
 	if err != nil {
 		return nil, err

@@ -47,6 +47,7 @@ func (s *AgentServer) Exec(ctx context.Context, req *agent.ExecRequest) (*agent.
 	cmd.Stdout = w
 	cmd.Stderr = w
 	cmd.Env = env
+	cmd.Dir = req.GetWorkingDir()
 	var errMessage string
 	start := time.Now()
 	if err := cmd.Run(); err != nil {
