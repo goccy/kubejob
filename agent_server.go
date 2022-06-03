@@ -68,6 +68,13 @@ func (s *AgentServer) Exec(ctx context.Context, req *agent.ExecRequest) (*agent.
 
 func (s *AgentServer) CopyFrom(req *agent.CopyFromRequest, stream agent.Agent_CopyFromServer) error {
 	log.Println("received copyFrom request")
+	if err := s.copyFrom(req, stream); err != nil {
+		log.Println(err)
+	}
+	return nil
+}
+
+func (s *AgentServer) copyFrom(req *agent.CopyFromRequest, stream agent.Agent_CopyFromServer) error {
 	f, err := os.Open(req.Path)
 	if err != nil {
 		return fmt.Errorf("failed to open %s: %w", req.Path, err)
@@ -96,11 +103,21 @@ func (s *AgentServer) CopyFrom(req *agent.CopyFromRequest, stream agent.Agent_Co
 
 func (s *AgentServer) CopyTo(stream agent.Agent_CopyToServer) error {
 	log.Println("received copyTo request")
+	copiedLength, err := s.copyTo(stream)
+	if err != nil {
+		log.Printf("copied length %d", copiedLength)
+		log.Println(err)
+		return err
+	}
+	return nil
+}
+
+func (s *AgentServer) copyTo(stream agent.Agent_CopyToServer) (int64, error) {
 	copyToResponse, err := stream.Recv()
 	path := copyToResponse.GetPath()
 	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("failed to create copy target file %s: %w", path, err)
+		return 0, fmt.Errorf("failed to create copy target file %s: %w", path, err)
 	}
 	defer f.Close()
 
@@ -111,18 +128,18 @@ func (s *AgentServer) CopyTo(stream agent.Agent_CopyToServer) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("failed to copy file. current copied buffer size is %d: %w", copiedLength, err)
+			return copiedLength, fmt.Errorf("failed to copy file. current copied buffer size is %d: %w", copiedLength, err)
 		}
 		n, err := f.Write(copyToResponse.Data)
 		if err != nil {
-			return fmt.Errorf("failed to write data to file: %w", err)
+			return copiedLength, fmt.Errorf("failed to write data to file: %w", err)
 		}
 		copiedLength += int64(n)
 	}
 	if err := stream.Send(&agent.CopyToResponse{CopiedLength: copiedLength}); err != nil {
-		return fmt.Errorf("failed to send CopyToResponse: %w", err)
+		return copiedLength, fmt.Errorf("failed to send CopyToResponse: %w", err)
 	}
-	return nil
+	return copiedLength, nil
 }
 
 func (s *AgentServer) Finish(ctx context.Context, req *agent.FinishRequest) (*agent.FinishResponse, error) {
@@ -165,9 +182,11 @@ func (s *AgentServer) Run(ctx context.Context) error {
 
 	select {
 	case <-s.stopCh:
+		log.Println("stop agent gracefully")
 		server.GracefulStop()
 		select {
 		case <-done:
+			log.Println("stopped agent successfuly")
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
