@@ -1,11 +1,14 @@
 package kubejob
 
 import (
+	"archive/tar"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -158,4 +161,120 @@ func agentAuthStreamInterceptor(signedToken string) grpc.StreamClientInterceptor
 		ctx = metadata.NewOutgoingContext(ctx, md)
 		return streamer(ctx, desc, cc, method, opts...)
 	}
+}
+
+func archivePath(targetPath string) (string, error) {
+	archivedFilePath := fmt.Sprintf("%s.tar", targetPath)
+	dst, err := os.Create(archivedFilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create archive file %s: %w", archivedFilePath, err)
+	}
+	defer dst.Close()
+
+	tw := tar.NewWriter(dst)
+	defer tw.Close()
+
+	finfo, err := os.Stat(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to get file info of src path %s: %w", targetPath, err)
+	}
+	if !finfo.IsDir() {
+		// file copy
+		if err := tw.WriteHeader(&tar.Header{
+			Name:    filepath.Base(targetPath),
+			Mode:    int64(finfo.Mode()),
+			ModTime: finfo.ModTime(),
+			Size:    finfo.Size(),
+		}); err != nil {
+			return "", fmt.Errorf("failed to write archive header to create archive file: %w", err)
+		}
+		f, err := os.Open(targetPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to open local file to create archive file: %w", err)
+		}
+		defer f.Close()
+		if _, err := io.Copy(tw, f); err != nil {
+			return "", fmt.Errorf("failed to copy local file to archive file: %w", err)
+		}
+		return archivedFilePath, nil
+	}
+
+	if err := filepath.Walk(targetPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("failed to create archive file: %w", err)
+		}
+		if info.IsDir() {
+			return nil
+		}
+		name := path[len(targetPath)+1:]
+		if err := tw.WriteHeader(&tar.Header{
+			Name:    name,
+			Mode:    int64(info.Mode()),
+			ModTime: info.ModTime(),
+			Size:    info.Size(),
+		}); err != nil {
+			return fmt.Errorf("failed to write archive header to create archive file: %w", err)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("failed to open local file to create archive file: %w", err)
+		}
+		defer f.Close()
+		if _, err := io.Copy(tw, f); err != nil {
+			return fmt.Errorf("failed to copy local file to archive file: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	return archivedFilePath, nil
+}
+
+func extractArchivedFile(filePath string, dstPath string) error {
+	baseDir := filepath.Dir(dstPath)
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open %s: %w", filePath, err)
+	}
+	defer f.Close()
+	tr := tar.NewReader(f)
+	for {
+		header, err := tr.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("failed to read archived file %s: %w", filePath, err)
+		}
+		path := filepath.Join(dstPath, header.Name)
+		if filepath.Join(baseDir, header.Name) == dstPath {
+			// specified file copy
+			if err := createFile(dstPath, tr); err != nil {
+				return err
+			}
+			return nil
+		}
+		if header.FileInfo().IsDir() {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				return fmt.Errorf("failed to create directory %s: %w", path, err)
+			}
+		} else {
+			if err := createFile(path, tr); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func createFile(path string, tr *tar.Reader) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("failed to create file %s: %w", path, err)
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, tr); err != nil {
+		return fmt.Errorf("failed to copy from archived file to local file: %w", err)
+	}
+	return nil
 }

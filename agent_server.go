@@ -74,9 +74,13 @@ func (s *AgentServer) CopyFrom(req *agent.CopyFromRequest, stream agent.Agent_Co
 }
 
 func (s *AgentServer) copyFrom(req *agent.CopyFromRequest, stream agent.Agent_CopyFromServer) error {
-	f, err := os.Open(req.Path)
+	archivedFilePath, err := archivePath(req.Path)
 	if err != nil {
-		return fmt.Errorf("failed to open %s: %w", req.Path, err)
+		return err
+	}
+	f, err := os.Open(archivedFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to open %s: %w", archivedFilePath, err)
 	}
 	defer f.Close()
 	buf := make([]byte, defaultStreamFileChunkSize)
@@ -89,7 +93,7 @@ func (s *AgentServer) copyFrom(req *agent.CopyFromRequest, stream agent.Agent_Co
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("failed to read file %s: %w", req.Path, err)
+			return fmt.Errorf("failed to read file %s: %w", archivedFilePath, err)
 		}
 		if err := stream.Send(&agent.CopyFromResponse{
 			Data: buf[:n],
@@ -102,19 +106,25 @@ func (s *AgentServer) copyFrom(req *agent.CopyFromRequest, stream agent.Agent_Co
 
 func (s *AgentServer) CopyTo(stream agent.Agent_CopyToServer) error {
 	log.Println("received copyTo request")
-	copiedLength, err := s.copyTo(stream)
+	copyToResponse, err := stream.Recv()
+	if err != nil {
+		return fmt.Errorf("failed to recv data: %w", err)
+	}
+	path := copyToResponse.GetPath()
+	archivedFilePath := fmt.Sprintf("%s.tar", path)
+	copiedLength, err := s.copyTo(archivedFilePath, stream)
 	if err != nil {
 		log.Printf("copied length %d", copiedLength)
 		log.Println(err)
 		return err
 	}
+	if err := extractArchivedFile(archivedFilePath, path); err != nil {
+		return fmt.Errorf("failed to extract archived file %s: %w", archivedFilePath, err)
+	}
 	return nil
 }
 
-func (s *AgentServer) copyTo(stream agent.Agent_CopyToServer) (int64, error) {
-	copyToResponse, err := stream.Recv()
-	path := copyToResponse.GetPath()
-
+func (s *AgentServer) copyTo(path string, stream agent.Agent_CopyToServer) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return 0, fmt.Errorf("failed to create directory %s: %w", filepath.Dir(path), err)
 	}

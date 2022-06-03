@@ -72,6 +72,17 @@ func (c *AgentClient) Exec(ctx context.Context, command []string, env []corev1.E
 }
 
 func (c *AgentClient) CopyFrom(ctx context.Context, srcPath, dstPath string) error {
+	archivedFilePath := fmt.Sprintf("%s.tar", dstPath)
+	if err := c.copyFrom(ctx, srcPath, archivedFilePath); err != nil {
+		return err
+	}
+	if err := extractArchivedFile(archivedFilePath, dstPath); err != nil {
+		return fmt.Errorf("failed to extract file %s: %w", archivedFilePath, err)
+	}
+	return nil
+}
+
+func (c *AgentClient) copyFrom(ctx context.Context, srcPath, dstPath string) error {
 	stream, err := c.client.CopyFrom(ctx, &agent.CopyFromRequest{
 		Path: srcPath,
 	})
@@ -110,14 +121,22 @@ func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error
 	}
 
 	buf := make([]byte, defaultStreamFileChunkSize)
-	f, err := os.Open(srcPath)
+	if _, err := os.Stat(srcPath); err != nil {
+		return fmt.Errorf("job: failed to get status of file %s: %w", srcPath, err)
+	}
+
+	archivedFilePath, err := archivePath(srcPath)
 	if err != nil {
-		return fmt.Errorf("job: failed to open file %s: %w", srcPath, err)
+		return err
+	}
+	f, err := os.Open(archivedFilePath)
+	if err != nil {
+		return fmt.Errorf("job: failed to open archived file %s: %w", archivedFilePath, err)
 	}
 	defer f.Close()
 	finfo, err := f.Stat()
 	if err != nil {
-		return fmt.Errorf("job: failed to get file info %s: %w", srcPath, err)
+		return fmt.Errorf("job: failed to get file info of %s: %w", archivedFilePath, err)
 	}
 	if err := stream.Send(&agent.CopyToRequest{
 		Path: dstPath,
@@ -130,7 +149,7 @@ func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("job: failed to read file %s: %w", srcPath, err)
+			return fmt.Errorf("job: failed to read file %s: %w", archivedFilePath, err)
 		}
 		if err := stream.Send(&agent.CopyToRequest{
 			Data: buf[:n],
