@@ -19,6 +19,8 @@ type JobExecutor struct {
 	Container    corev1.Container
 	ContainerIdx int
 	Pod          *corev1.Pod
+	agentCfg     *AgentConfig
+	agentClient  *AgentClient
 	command      []string
 	args         []string
 	job          *Job
@@ -26,6 +28,26 @@ type JobExecutor struct {
 	stopped      bool
 	isRunningMu  sync.Mutex
 	err          error
+}
+
+func (e *JobExecutor) enabledAgent() bool {
+	return e.agentCfg != nil
+}
+
+func (e *JobExecutor) setPod(pod *corev1.Pod) error {
+	e.Pod = pod
+	if e.enabledAgent() {
+		signedToken, err := e.agentCfg.IssueJWT()
+		if err != nil {
+			return err
+		}
+		client, err := NewAgentClient(pod, e.agentCfg.grpcPort, string(signedToken))
+		if err != nil {
+			return fmt.Errorf("failed to create agent client: %w", err)
+		}
+		e.agentClient = client
+	}
+	return nil
 }
 
 // If a command like `sh -c "x; y; z" is passed as a cmd,
@@ -55,6 +77,16 @@ func (e *JobExecutor) normalizeCmd(cmd []string) string {
 }
 
 func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
+	if e.enabledAgent() {
+		result, err := e.agentClient.Exec(context.Background(), cmd, nil)
+		if err != nil {
+			return nil, err
+		}
+		if result.Success {
+			return []byte(result.Output), nil
+		}
+		return []byte(result.Output), errCommandFromAgent(result.ErrorMessage)
+	}
 	pod := e.Pod
 	req := e.job.restClient.Post().
 		Namespace(pod.Namespace).
@@ -206,6 +238,9 @@ func (e *JobExecutor) TerminationLog(log string) error {
 	if e.stopped {
 		return fmt.Errorf("job: failed to send termination log because container has already been stopped")
 	}
+	if e.enabledAgent() {
+		return nil
+	}
 	termMessagePath := e.Container.TerminationMessagePath
 	if termMessagePath == "" {
 		termMessagePath = corev1.TerminationMessagePathDefault
@@ -223,12 +258,18 @@ func (e *JobExecutor) Stop() error {
 	defer func() {
 		e.setIsRunning(false)
 	}()
-	var status int
-	if e.err != nil {
-		status = 1
-	}
-	if _, err := e.execWithRetry([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
-		return errStopContainer(err)
+	if e.enabledAgent() {
+		if err := e.agentClient.Stop(context.Background()); err != nil {
+			return errStopContainer(err)
+		}
+	} else {
+		var status int
+		if e.err != nil {
+			status = 1
+		}
+		if _, err := e.execWithRetry([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
+			return errStopContainer(err)
+		}
 	}
 	e.stopped = true
 	return nil
@@ -243,6 +284,7 @@ type jobInit struct {
 	executedContainerNameMap map[string]struct{}
 	stepNum                  int
 	handler                  JobInitContainerExecutionHandler
+	agentCfg                 *AgentConfig
 }
 
 func (j *jobInit) needsToRun(status corev1.PodStatus) bool {
@@ -258,6 +300,19 @@ func (j *jobInit) needsToRun(status corev1.PodStatus) bool {
 	return true
 }
 
+func (j *jobInit) isReplacedCommand(c corev1.Container) bool {
+	if len(c.Command) == 0 {
+		return false
+	}
+	if j.agentCfg != nil {
+		return c.Command[0] == j.agentCfg.path
+	}
+	if len(c.Args) == 0 {
+		return false
+	}
+	return c.Args[0] == jobCommandTemplate
+}
+
 func (j *jobInit) run(pod *corev1.Pod) error {
 	if j.done {
 		return nil
@@ -269,9 +324,11 @@ func (j *jobInit) run(pod *corev1.Pod) error {
 			}
 			for _, c := range pod.Spec.InitContainers {
 				if c.Name == status.Name {
-					if len(c.Args) > 0 && c.Args[0] == jobCommandTemplate {
+					if j.isReplacedCommand(c) {
 						exec := j.executors[j.stepNum]
-						exec.Pod = pod
+						if err := exec.setPod(pod); err != nil {
+							return fmt.Errorf("job: failed to set corev1.Pod to executor instance: %w", err)
+						}
 						if err := j.handler(exec); err != nil {
 							return err
 						}
@@ -291,13 +348,14 @@ func (j *jobInit) run(pod *corev1.Pod) error {
 	return nil
 }
 
-func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecutionHandler) error {
+func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecutionHandler, agentCfg *AgentConfig) error {
 	if handler == nil {
 		return fmt.Errorf("job: failed to set JobInitContainerExecutionHandler. handler is nil")
 	}
 	jobInit := &jobInit{
 		handler:                  handler,
 		executedContainerNameMap: map[string]struct{}{},
+		agentCfg:                 agentCfg,
 	}
 	for idx, c := range j.Job.Spec.Template.Spec.InitContainers {
 		c := c
@@ -307,18 +365,30 @@ func (j *Job) SetInitContainerExecutionHandler(handler JobInitContainerExecution
 			command:      c.Command,
 			args:         c.Args,
 			job:          j,
+			agentCfg:     agentCfg,
 		})
-		jobInit.containers = append(jobInit.containers, jobTemplateCommandContainer(c))
+		if agentCfg != nil {
+			c.Env = append(c.Env, agentCfg.PublicKeyEnv())
+		}
+		jobInit.containers = append(jobInit.containers, jobTemplateCommandContainer(c, agentCfg))
 	}
 	j.jobInit = jobInit
 	return nil
+}
+
+// UseAgent when you use RunWithExecutionHandler, kubejob replace specified commands with a wait loop command
+// to control when the command is executed.
+// If the kubejob-agent is present in the container,
+// you can specify its path and the port to listen to so that it will wait using the kubejob-agent.
+func (j *Job) UseAgent(agentCfg *AgentConfig) {
+	j.agentCfg = agentCfg
 }
 
 type JobExecutionHandler func([]*JobExecutor) error
 
 func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler) error {
 	childCtx, cancel := context.WithCancel(ctx)
-	errCh := make(chan error, 1)
+	errCh := make(chan error)
 	go func() {
 		errCh <- j.runWithExecutionHandler(childCtx, cancel, handler)
 	}()
@@ -345,9 +415,17 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 			command:      command,
 			args:         args,
 			job:          j,
+			agentCfg:     j.agentCfg,
 		}
-		j.Job.Spec.Template.Spec.Containers[idx].Command = []string{"sh"}
-		j.Job.Spec.Template.Spec.Containers[idx].Args = []string{"-c", jobCommandTemplate}
+		if j.agentCfg != nil {
+			replaceCommandByAgentConfig(&j.Job.Spec.Template.Spec.Containers[idx], j.agentCfg)
+			j.Job.Spec.Template.Spec.Containers[idx].Env = append(
+				j.Job.Spec.Template.Spec.Containers[idx].Env,
+				j.agentCfg.PublicKeyEnv(),
+			)
+		} else {
+			replaceCommandByJobTemplate(&j.Job.Spec.Template.Spec.Containers[idx])
+		}
 	}
 	j.DisableCommandLog()
 	existsErrContainer := false
@@ -358,7 +436,9 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 		executors := []*JobExecutor{}
 		for _, container := range pod.Spec.Containers {
 			if executor, exists := executorMap[container.Name]; exists {
-				executor.Pod = pod
+				if err := executor.setPod(pod); err != nil {
+					return fmt.Errorf("failed to set corev1.Pod to executor instance: %w", err)
+				}
 				executors = append(executors, executor)
 			} else {
 				// found injected container.

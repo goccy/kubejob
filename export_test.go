@@ -14,3 +14,6 @@ func SetExecRetryCount(retry int) func() {
 	ExecRetryCount = retry
 	return func() { ExecRetryCount = defaultCount }
 }
+
+var AgentAuthUnaryInterceptor = agentAuthUnaryInterceptor
+var AgentAuthStreamInterceptor = agentAuthStreamInterceptor

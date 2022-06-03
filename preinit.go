@@ -1,20 +1,26 @@
 package kubejob
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 )
 
 // PreInit can define the process you want to execute before the process of init container specified at the time of starting Job.
 // It is mainly intended to be used when you use `(*JobExecutor).CopyToFile` to copy an arbitrary file to pod before init processing.
-func (j *Job) PreInit(c corev1.Container, cb func(exec *JobExecutor) error) {
+func (j *Job) PreInit(c corev1.Container, cb func(exec *JobExecutor) error, agentCfg *AgentConfig) {
+	if agentCfg != nil {
+		c.Env = append(c.Env, agentCfg.PublicKeyEnv())
+	}
 	j.preInit = &preInit{
-		container: jobTemplateCommandContainer(c),
+		container: jobTemplateCommandContainer(c, agentCfg),
 		callback:  cb,
 		exec: &JobExecutor{
 			Container: c,
 			command:   c.Command,
 			args:      c.Args,
 			job:       j,
+			agentCfg:  agentCfg,
 		},
 	}
 }
@@ -51,7 +57,9 @@ func (i *preInit) run(pod *corev1.Pod) error {
 	if i.done {
 		return nil
 	}
-	i.exec.Pod = pod
+	if err := i.exec.setPod(pod); err != nil {
+		return fmt.Errorf("job: failed to set corev1.Pod to preinit executor instance: %w", err)
+	}
 	logger := i.exec.job.containerLogger
 	i.exec.job.containerLogger = func(log *ContainerLog) {
 		if log.Container.Name == i.container.Name {

@@ -73,6 +73,7 @@ type Job struct {
 	preInit                  *preInit
 	jobInit                  *jobInit
 	pendingTimeout           *time.Duration
+	agentCfg                 *AgentConfig
 }
 
 type ContainerLogger func(*ContainerLog)

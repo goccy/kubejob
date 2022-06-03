@@ -157,11 +157,15 @@ func (e *PreInitError) Error() string {
 }
 
 type CommandError struct {
+	Message   string
 	ReaderErr error
 	WriterErr error
 }
 
 func (e *CommandError) IsExitError() bool {
+	if e.Message != "" {
+		return true
+	}
 	if _, ok := e.ReaderErr.(executil.ExitError); ok {
 		return true
 	}
@@ -172,6 +176,9 @@ func (e *CommandError) IsExitError() bool {
 }
 
 func (e *CommandError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
 	msgs := []string{}
 	if e.ReaderErr != nil {
 		msgs = append(msgs, fmt.Sprintf("read error: %s", e.ReaderErr))
@@ -261,6 +268,12 @@ func errCommand(reader, writer error) error {
 	return &CommandError{
 		ReaderErr: reader,
 		WriterErr: writer,
+	}
+}
+
+func errCommandFromAgent(msg string) error {
+	return &CommandError{
+		Message: msg,
 	}
 }
 
