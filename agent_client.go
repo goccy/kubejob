@@ -72,7 +72,13 @@ func (c *AgentClient) Exec(ctx context.Context, command []string, env []corev1.E
 }
 
 func (c *AgentClient) CopyFrom(ctx context.Context, srcPath, dstPath string) error {
+	finfo, err := os.Stat(dstPath)
 	archivedFilePath := fmt.Sprintf("%s.tar", dstPath)
+	if err == nil && finfo.IsDir() {
+		// if dstPath is directory, copy specified src into it.
+		archivedFilePath = filepath.Join(dstPath, fmt.Sprintf("%s.tar", filepath.Base(dstPath)))
+	}
+	defer os.Remove(archivedFilePath) // ignore error
 	if err := c.copyFrom(ctx, srcPath, archivedFilePath); err != nil {
 		return err
 	}

@@ -496,8 +496,12 @@ func createTemporaryDirectory(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	contentDir := filepath.Join(repoDir, "content")
+	if err := os.Mkdir(contentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 3; i++ {
-		f, err := os.Create(filepath.Join(repoDir, fmt.Sprintf("%d.txt", i)))
+		f, err := os.Create(filepath.Join(contentDir, fmt.Sprintf("%d.txt", i)))
 		if err != nil {
 			t.Fatal(err)
 		}

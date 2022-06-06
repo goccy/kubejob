@@ -199,6 +199,7 @@ func archivePath(targetPath string) (string, error) {
 		return archivedFilePath, nil
 	}
 
+	pathToDir := filepath.Dir(targetPath)
 	if err := filepath.Walk(targetPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return fmt.Errorf("failed to create archive file: %w", err)
@@ -206,7 +207,7 @@ func archivePath(targetPath string) (string, error) {
 		if info.IsDir() {
 			return nil
 		}
-		name := path[len(targetPath)+1:]
+		name := path[len(pathToDir)+1:]
 		if err := tw.WriteHeader(&tar.Header{
 			Name:    name,
 			Mode:    int64(info.Mode()),
@@ -268,6 +269,9 @@ func extractArchivedFile(filePath string, dstPath string) error {
 }
 
 func createFile(path string, tr *tar.Reader) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", filepath.Dir(path), err)
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create file %s: %w", path, err)
