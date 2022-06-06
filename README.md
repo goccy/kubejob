@@ -161,6 +161,8 @@ job.UseAgent(agentConfig)
 This will switch from communication using the Kubernetes API to gRPC-based communication with kubejob-agent.
 Communication with `kubejob-agent` is performed using JWT issued using the RSA Key issued each time Kubernetes Job is started, so requests cannot be sent directly to the container from other processes.
 
+<img width="700px" src="https://user-images.githubusercontent.com/209884/172190425-26f17151-20e9-4e6b-857f-8b9ae230927a.png"/>
+
 # Requirements
 
 ## Role
