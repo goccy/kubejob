@@ -111,7 +111,13 @@ func (s *AgentServer) CopyTo(stream agent.Agent_CopyToServer) error {
 		return fmt.Errorf("failed to recv data: %w", err)
 	}
 	path := copyToResponse.GetPath()
+	finfo, err := os.Stat(path)
 	archivedFilePath := fmt.Sprintf("%s.tar", path)
+	if err == nil && finfo.IsDir() {
+		// if path is directory, copy specified src into it.
+		archivedFilePath = filepath.Join(path, fmt.Sprintf("%s.tar", filepath.Base(path)))
+	}
+	defer os.Remove(archivedFilePath)
 	copiedLength, err := s.copyTo(archivedFilePath, stream)
 	if err != nil {
 		log.Printf("copied length %d", copiedLength)
