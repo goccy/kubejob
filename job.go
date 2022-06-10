@@ -159,6 +159,9 @@ func (j *Job) cleanup(ctx context.Context) error {
 
 func (j *Job) Run(ctx context.Context) (e error) {
 	if j.jobInit != nil {
+		if err := j.setupInitContainers(); err != nil {
+			return err
+		}
 		j.Job.Spec.Template.Spec.InitContainers = j.jobInit.containers
 		if j.preInit != nil {
 			// ignore preinit container
@@ -166,6 +169,9 @@ func (j *Job) Run(ctx context.Context) (e error) {
 		}
 	}
 	if j.preInit != nil {
+		if err := j.setupPreInitContainer(); err != nil {
+			return err
+		}
 		initContainers := j.Job.Spec.Template.Spec.InitContainers
 		j.Job.Spec.Template.Spec.InitContainers = append([]corev1.Container{j.preInit.container}, initContainers...)
 	}

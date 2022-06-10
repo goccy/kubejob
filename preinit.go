@@ -8,27 +8,35 @@ import (
 
 // PreInit can define the process you want to execute before the process of init container specified at the time of starting Job.
 // It is mainly intended to be used when you use `(*JobExecutor).CopyToFile` to copy an arbitrary file to pod before init processing.
-func (j *Job) PreInit(c corev1.Container, cb func(exec *JobExecutor) error, agentCfg *AgentConfig) error {
+func (j *Job) PreInit(c corev1.Container, cb func(exec *JobExecutor) error) {
+	j.preInit = &preInit{
+		container: c,
+		callback:  cb,
+	}
+}
+
+func (j *Job) setupPreInitContainer() error {
+	if j.preInit == nil {
+		return nil
+	}
+	c := j.preInit.container
 	var agentPort uint16
-	if agentCfg != nil {
-		port, err := agentCfg.NewAllocatedPort()
+	if j.agentCfg != nil && j.agentCfg.Enabled(c.Name) {
+		port, err := j.agentCfg.NewAllocatedPort()
 		if err != nil {
 			return err
 		}
 		agentPort = port
-		c.Env = append(c.Env, agentCfg.PublicKeyEnv())
+		c.Env = append(c.Env, j.agentCfg.PublicKeyEnv())
 	}
-	j.preInit = &preInit{
-		container: jobTemplateCommandContainer(c, agentCfg, agentPort),
-		callback:  cb,
-		exec: &JobExecutor{
-			Container: c,
-			command:   c.Command,
-			args:      c.Args,
-			job:       j,
-			agentCfg:  agentCfg,
-			agentPort: agentPort,
-		},
+	j.preInit.container = jobTemplateCommandContainer(c, j.agentCfg, agentPort)
+	j.preInit.exec = &JobExecutor{
+		Container: c,
+		command:   c.Command,
+		args:      c.Args,
+		job:       j,
+		agentCfg:  j.agentCfg,
+		agentPort: agentPort,
 	}
 	return nil
 }
