@@ -36,7 +36,7 @@ func createGRPCConn(t *testing.T, signedToken string) grpc.ClientConnInterface {
 }
 
 func TestAgentServer(t *testing.T) {
-	agentConfig, err := kubejob.NewAgentConfig("")
+	agentConfig, err := kubejob.NewAgentConfig(map[string]string{})
 	if err != nil {
 		t.Fatal(err)
 	}

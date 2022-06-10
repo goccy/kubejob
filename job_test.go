@@ -980,7 +980,9 @@ ln -s /tmp/symfile /tmp/artifacts/symfile
 }
 
 func Test_CopyWithAgent(t *testing.T) {
-	agentConfig, err := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+	agentConfig, err := kubejob.NewAgentConfig(map[string]string{
+		"test": filepath.Join("/", "bin", "kubejob-agent"),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1018,9 +1020,7 @@ echo -n "hello" > /tmp/artifact.txt
 		if err != nil {
 			t.Fatalf("failed to build job: %+v", err)
 		}
-		job.UseAgent(map[string]*kubejob.AgentConfig{
-			"test": agentConfig,
-		})
+		job.UseAgent(agentConfig)
 		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
 			if len(executors) != 1 {
 				return fmt.Errorf("invalid executor num. expected 1 but got %d", len(executors))
@@ -1079,9 +1079,7 @@ echo -n "hello" > /tmp/artifact.txt
 		if err != nil {
 			t.Fatalf("failed to build job: %+v", err)
 		}
-		job.UseAgent(map[string]*kubejob.AgentConfig{
-			"test": agentConfig,
-		})
+		job.UseAgent(agentConfig)
 		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
 			if len(executors) != 1 {
 				return fmt.Errorf("invalid executor num. expected 1 but got %d", len(executors))
