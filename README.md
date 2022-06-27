@@ -151,7 +151,9 @@ $ go install github.com/goccy/kubejob/cmd/kubejob-agent
 Include this tool in your container image, create `kubejob.AgentConfig` with the path where `kubejob-agent` is located, and give it to `kubejob.Job` as follows:
 
 ```go
-agentConfig, err := kubejob.NewAgentConfig(filepath.Join("/", "bin", "kubejob-agent"))
+agentConfig, err := kubejob.NewAgentConfig(map[string]string{
+  "container-name": filepath.Join("/", "bin", "kubejob-agent"),
+})
 if err != nil {
   return err
 }
