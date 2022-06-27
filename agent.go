@@ -29,16 +29,16 @@ const (
 )
 
 type AgentConfig struct {
-	path                string
-	allocationStartPort uint16
-	lastAllocatedPort   uint16
-	excludePortMap      map[uint16]struct{}
-	portMapMu           sync.RWMutex
-	privateKey          *rsa.PrivateKey
-	publicKeyPEM        string
+	containerNameToInstalledPathMap map[string]string
+	allocationStartPort             uint16
+	lastAllocatedPort               uint16
+	excludePortMap                  map[uint16]struct{}
+	portMapMu                       sync.RWMutex
+	privateKey                      *rsa.PrivateKey
+	publicKeyPEM                    string
 }
 
-func NewAgentConfig(path string) (*AgentConfig, error) {
+func NewAgentConfig(containerNameToInstalledPathMap map[string]string) (*AgentConfig, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, rsaBitSize)
 	if err != nil {
 		return nil, fmt.Errorf("job: failed to generate rsa key: %w", err)
@@ -48,12 +48,21 @@ func NewAgentConfig(path string) (*AgentConfig, error) {
 		return nil, fmt.Errorf("job: failed to encode public key: %w", err)
 	}
 	return &AgentConfig{
-		path:                path,
-		allocationStartPort: defaultAgentAllocationStartPort,
-		excludePortMap:      map[uint16]struct{}{},
-		privateKey:          privateKey,
-		publicKeyPEM:        string(publicKeyPEM),
+		containerNameToInstalledPathMap: containerNameToInstalledPathMap,
+		allocationStartPort:             defaultAgentAllocationStartPort,
+		excludePortMap:                  map[uint16]struct{}{},
+		privateKey:                      privateKey,
+		publicKeyPEM:                    string(publicKeyPEM),
 	}, nil
+}
+
+func (c *AgentConfig) Enabled(containerName string) bool {
+	path, exists := c.containerNameToInstalledPathMap[containerName]
+	return exists && path != ""
+}
+
+func (c *AgentConfig) InstalledPath(containerName string) string {
+	return c.containerNameToInstalledPathMap[containerName]
 }
 
 func (c *AgentConfig) IssueJWT() ([]byte, error) {

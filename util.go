@@ -17,8 +17,8 @@ exit $(cat /tmp/kubejob-status)
 
 func jobTemplateCommandContainer(c corev1.Container, agentCfg *AgentConfig, agentPort uint16) corev1.Container {
 	copied := c.DeepCopy()
-	if agentCfg != nil {
-		replaceCommandByAgentCommand(copied, agentCfg.path, agentPort)
+	if agentCfg != nil && agentCfg.Enabled(c.Name) {
+		replaceCommandByAgentCommand(copied, agentCfg.InstalledPath(c.Name), agentPort)
 	} else {
 		replaceCommandByJobTemplate(copied)
 	}
