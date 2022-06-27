@@ -31,13 +31,13 @@ type JobExecutor struct {
 	err          error
 }
 
-func (e *JobExecutor) enabledAgent() bool {
+func (e *JobExecutor) EnabledAgent() bool {
 	return e.agentCfg != nil && e.agentCfg.Enabled(e.Container.Name)
 }
 
 func (e *JobExecutor) setPod(pod *corev1.Pod) error {
 	e.Pod = pod
-	if e.enabledAgent() {
+	if e.EnabledAgent() {
 		signedToken, err := e.agentCfg.IssueJWT()
 		if err != nil {
 			return err
@@ -83,7 +83,7 @@ func (e *JobExecutor) normalizeCmd(cmd []string) string {
 }
 
 func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
-	if e.enabledAgent() {
+	if e.EnabledAgent() {
 		result, err := e.agentClient.Exec(context.Background(), cmd, nil)
 		if err != nil {
 			return nil, err
@@ -244,7 +244,7 @@ func (e *JobExecutor) TerminationLog(log string) error {
 	if e.stopped {
 		return fmt.Errorf("job: failed to send termination log because container has already been stopped")
 	}
-	if e.enabledAgent() {
+	if e.EnabledAgent() {
 		return nil
 	}
 	termMessagePath := e.Container.TerminationMessagePath
@@ -264,7 +264,7 @@ func (e *JobExecutor) Stop() error {
 	defer func() {
 		e.setIsRunning(false)
 	}()
-	if e.enabledAgent() {
+	if e.EnabledAgent() {
 		if err := e.agentClient.Stop(context.Background()); err != nil {
 			return errStopContainer(err)
 		}

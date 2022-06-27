@@ -30,7 +30,7 @@ func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
 	if _, err := os.Stat(srcPath); err != nil {
 		return errCopy(srcPath, dstPath, fmt.Errorf("%s doesn't exist in local filesystem", srcPath))
 	}
-	if e.enabledAgent() {
+	if e.EnabledAgent() {
 		return e.agentClient.CopyTo(context.Background(), srcPath, dstPath)
 	}
 
@@ -107,7 +107,7 @@ func (e *JobExecutor) CopyFromPod(srcPath, dstPath string) error {
 	if e.stopped {
 		return fmt.Errorf("job: failed to copy from pod. pod is already stopped")
 	}
-	if e.enabledAgent() {
+	if e.EnabledAgent() {
 		return e.agentClient.CopyFrom(context.Background(), srcPath, dstPath)
 	}
 	return e.copyFromPodWithRetry(srcPath, dstPath)
