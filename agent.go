@@ -259,7 +259,7 @@ func extractArchivedFile(filePath string, dstPath string) error {
 		path := filepath.Join(dstPath, header.Name)
 		if filepath.Join(baseDir, header.Name) == dstPath {
 			// specified file copy
-			if err := createFile(dstPath, tr); err != nil {
+			if err := createFile(dstPath, header.Mode, tr); err != nil {
 				return err
 			}
 			return nil
@@ -269,7 +269,7 @@ func extractArchivedFile(filePath string, dstPath string) error {
 				return fmt.Errorf("failed to create directory %s: %w", path, err)
 			}
 		} else {
-			if err := createFile(path, tr); err != nil {
+			if err := createFile(path, header.Mode, tr); err != nil {
 				return err
 			}
 		}
@@ -277,7 +277,7 @@ func extractArchivedFile(filePath string, dstPath string) error {
 	return nil
 }
 
-func createFile(path string, tr *tar.Reader) error {
+func createFile(path string, mode int64, tr *tar.Reader) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", filepath.Dir(path), err)
 	}
@@ -286,6 +286,9 @@ func createFile(path string, tr *tar.Reader) error {
 		return fmt.Errorf("failed to create file %s: %w", path, err)
 	}
 	defer f.Close()
+	if err := f.Chmod(os.FileMode(mode)); err != nil {
+		return fmt.Errorf("failed to apply chmod %d", mode)
+	}
 	if _, err := io.Copy(f, tr); err != nil {
 		return fmt.Errorf("failed to copy from archived file to local file: %w", err)
 	}
