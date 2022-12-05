@@ -149,14 +149,17 @@ func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error
 	}); err != nil {
 		return fmt.Errorf("job: failed to send dst path with grpc stream: %w", err)
 	}
+	sendSize := 0
 	for {
 		n, err := f.Read(buf)
 		if err == io.EOF {
+			fmt.Println("receive io.EOF", n)
 			break
 		}
 		if err != nil {
 			return fmt.Errorf("job: failed to read file %s: %w", archivedFilePath, err)
 		}
+		sendSize += n
 		if err := stream.Send(&agent.CopyToRequest{
 			Data: buf[:n],
 		}); err != nil {
@@ -171,6 +174,7 @@ func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error
 		return fmt.Errorf("job: failed to recv data with grpc stream: %w", err)
 	}
 	if resp.CopiedLength != finfo.Size() {
+		fmt.Println("SEND SIZE", sendSize)
 		return fmt.Errorf("job: mismatch copied length. expected size %d but got copied size %d", finfo.Size(), resp.CopiedLength)
 	}
 	return nil
