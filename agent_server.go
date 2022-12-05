@@ -16,6 +16,7 @@ import (
 	"github.com/goccy/kubejob/agent"
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -176,6 +177,12 @@ func (s *AgentServer) Run(ctx context.Context) error {
 	}
 
 	server := grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(
+			keepalive.EnforcementPolicy{
+				MinTime:             5 * time.Second,
+				PermitWithoutStream: true,
+			},
+		),
 		grpc.StreamInterceptor(grpc_auth.StreamServerInterceptor(authFunc)),
 		grpc.UnaryInterceptor(grpc_auth.UnaryServerInterceptor(authFunc)),
 	)

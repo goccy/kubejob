@@ -6,10 +6,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/goccy/kubejob/agent"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -19,9 +21,19 @@ type AgentClient struct {
 	client     agent.AgentClient
 }
 
+const (
+	GRPCClientKeepaliveTime    = 10 * time.Second
+	GRPCClientKeepaliveTimeout = 5 * time.Second
+)
+
 func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, signedToken string) (*AgentClient, error) {
 	ipAddr := agentServerPod.Status.PodIP
 	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", ipAddr, listenPort),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                GRPCClientKeepaliveTime,
+			Timeout:             GRPCClientKeepaliveTimeout,
+			PermitWithoutStream: true,
+		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithUnaryInterceptor(agentAuthUnaryInterceptor(signedToken)),
@@ -31,6 +43,7 @@ func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, s
 		return nil, fmt.Errorf("job: failed to dial grpc: %w", err)
 	}
 	client := agent.NewAgentClient(conn)
+	fmt.Println("agent-client", fmt.Sprintf("%s:%d", ipAddr, listenPort))
 	return &AgentClient{
 		serverPod:  agentServerPod,
 		workingDir: workingDir,
