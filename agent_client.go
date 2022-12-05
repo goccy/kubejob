@@ -103,7 +103,6 @@ func (c *AgentClient) CopyFrom(ctx context.Context, srcPath, dstPath string) err
 }
 
 func (c *AgentClient) copyFrom(ctx context.Context, srcPath, dstPath string) error {
-	fmt.Println("client: copyFrom", srcPath, dstPath)
 	stream, err := c.client.CopyFrom(ctx, &agent.CopyFromRequest{
 		Path: srcPath,
 	})
@@ -126,13 +125,11 @@ func (c *AgentClient) copyFrom(ctx context.Context, srcPath, dstPath string) err
 	for {
 		copyFromResponse, err := stream.Recv()
 		if err == io.EOF {
-			fmt.Println("Recv: io.EOF", srcPath, dstPath)
 			break
 		}
 		if err != nil {
 			return fmt.Errorf("job: failed to grpc stream copy: %w", err)
 		}
-		fmt.Println("copyFrom: Recv", srcPath, dstPath, len(copyFromResponse.Data))
 		if _, err := f.Write(copyFromResponse.Data); err != nil {
 			return fmt.Errorf("job: failed to write data: %w", err)
 		}
@@ -172,11 +169,17 @@ func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error
 	}); err != nil {
 		return fmt.Errorf("job: failed to send dst path with grpc stream: %w", err)
 	}
+	retryCount := 0
 	sendSize := 0
 	for {
 		n, err := f.Read(buf)
 		if err == io.EOF {
-			fmt.Println("receive io.EOF", n)
+			if int64(sendSize) != finfo.Size() && retryCount < 3 {
+				retryCount++
+				fmt.Printf("SEND SIZE is not finfo.Size(). retry %d\n", retryCount)
+				fmt.Println("SEND SIZE", sendSize, "finfo.Size() = ", finfo.Size())
+				continue
+			}
 			break
 		}
 		if err != nil {
@@ -197,7 +200,7 @@ func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error
 		return fmt.Errorf("job: failed to recv data with grpc stream: %w", err)
 	}
 	if resp.CopiedLength != finfo.Size() {
-		fmt.Println("SEND SIZE", sendSize)
+		fmt.Println("SEND SIZE", sendSize, "finfo.Size = ", finfo.Size())
 		return fmt.Errorf("job: mismatch copied length. expected size %d but got copied size %d", finfo.Size(), resp.CopiedLength)
 	}
 	return nil
