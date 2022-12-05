@@ -245,7 +245,7 @@ func (e *JobExecutor) TerminationLog(log string) error {
 		return fmt.Errorf("job: failed to send termination log because container has already been stopped")
 	}
 	if e.EnabledAgent() {
-		return nil
+		return e.Stop()
 	}
 	termMessagePath := e.Container.TerminationMessagePath
 	if termMessagePath == "" {

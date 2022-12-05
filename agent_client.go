@@ -22,8 +22,8 @@ type AgentClient struct {
 }
 
 const (
-	GRPCClientKeepaliveTime    = 10 * time.Second
-	GRPCClientKeepaliveTimeout = 5 * time.Second
+	GRPCClientKeepaliveTime    = 30 * time.Second
+	GRPCClientKeepaliveTimeout = 5 * 60 * time.Second
 )
 
 func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, signedToken string) (*AgentClient, error) {
@@ -42,6 +42,7 @@ func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, s
 	if err != nil {
 		return nil, fmt.Errorf("job: failed to dial grpc: %w", err)
 	}
+	fmt.Println("setup keepalive")
 	client := agent.NewAgentClient(conn)
 	fmt.Println("agent-client", fmt.Sprintf("%s:%d", ipAddr, listenPort))
 	return &AgentClient{
@@ -102,18 +103,22 @@ func (c *AgentClient) CopyFrom(ctx context.Context, srcPath, dstPath string) err
 }
 
 func (c *AgentClient) copyFrom(ctx context.Context, srcPath, dstPath string) error {
+	fmt.Println("client: copyFrom", srcPath, dstPath)
 	stream, err := c.client.CopyFrom(ctx, &agent.CopyFromRequest{
 		Path: srcPath,
 	})
 	if err != nil {
+		fmt.Println("err", fmt.Errorf("job: failed to create grpc stream to copy from pod: %w", err))
 		return fmt.Errorf("job: failed to create grpc stream to copy from pod: %w", err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+		fmt.Println(fmt.Errorf("job: failed to create directory %s: %w", filepath.Dir(dstPath), err))
 		return fmt.Errorf("job: failed to create directory %s: %w", filepath.Dir(dstPath), err)
 	}
 	f, err := os.Create(dstPath)
 	if err != nil {
+		fmt.Println(fmt.Errorf("job: failed to create file %s to copy: %w", dstPath, err))
 		return fmt.Errorf("job: failed to create file %s to copy: %w", dstPath, err)
 	}
 	defer f.Close()
@@ -121,14 +126,19 @@ func (c *AgentClient) copyFrom(ctx context.Context, srcPath, dstPath string) err
 	for {
 		copyFromResponse, err := stream.Recv()
 		if err == io.EOF {
+			fmt.Println("Recv: io.EOF", srcPath, dstPath)
 			break
 		}
 		if err != nil {
 			return fmt.Errorf("job: failed to grpc stream copy: %w", err)
 		}
+		fmt.Println("copyFrom: Recv", srcPath, dstPath, len(copyFromResponse.Data))
 		if _, err := f.Write(copyFromResponse.Data); err != nil {
 			return fmt.Errorf("job: failed to write data: %w", err)
 		}
+	}
+	if err := stream.CloseSend(); err != nil {
+		return fmt.Errorf("job: failed to close send request: %w", err)
 	}
 	return nil
 }

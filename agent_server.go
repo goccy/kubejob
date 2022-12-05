@@ -88,6 +88,7 @@ func (s *AgentServer) copyFrom(req *agent.CopyFromRequest, stream agent.Agent_Co
 	for {
 		n, err := f.Read(buf)
 		if err == io.EOF {
+			fmt.Println("server: EOF", n)
 			if n > 0 {
 				return fmt.Errorf("failed to send buffer length %d", n)
 			}
@@ -96,9 +97,11 @@ func (s *AgentServer) copyFrom(req *agent.CopyFromRequest, stream agent.Agent_Co
 		if err != nil {
 			return fmt.Errorf("failed to read file %s: %w", archivedFilePath, err)
 		}
+		fmt.Println("send buffer")
 		if err := stream.Send(&agent.CopyFromResponse{
 			Data: buf[:n],
 		}); err != nil {
+			fmt.Println(fmt.Errorf("failed to send file data with grpc stream: %w", err))
 			return fmt.Errorf("failed to send file data with grpc stream: %w", err)
 		}
 	}
@@ -145,6 +148,7 @@ func (s *AgentServer) copyTo(path string, stream agent.Agent_CopyToServer) (int6
 	for {
 		copyToResponse, err := stream.Recv()
 		if err == io.EOF {
+			fmt.Println("recv io.EOF", copyToResponse)
 			break
 		}
 		if err != nil {
