@@ -227,6 +227,113 @@ func (e *JobUnexpectedError) Error() string {
 	return fmt.Sprintf("job: pod status became failed without being in running phase: %s", e.Pod.Status.Message)
 }
 
+type JobMultiError struct {
+	Errs []error
+}
+
+type ErrorType int
+
+const (
+	FailedJobType ErrorType = iota
+	CleanupErrorType
+	LogStreamErrorType
+	JobCreationErrorType
+	JobWatchErrorType
+	ValidationErrorType
+	PreInitErrorType
+	CommandErrorType
+	JobStopContainerErrorType
+	PendingPhaseTimeoutErrorType
+	CopyErrorType
+	JobUnexpectedErrorType
+)
+
+func (e *JobMultiError) Has(typ ErrorType) bool {
+	switch typ {
+	case FailedJobType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*FailedJob); ok {
+				return true
+			}
+		}
+	case CleanupErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*CleanupError); ok {
+				return true
+			}
+		}
+	case LogStreamErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*LogStreamError); ok {
+				return true
+			}
+		}
+	case JobCreationErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*JobCreationError); ok {
+				return true
+			}
+		}
+	case JobWatchErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*JobWatchError); ok {
+				return true
+			}
+		}
+	case ValidationErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*ValidationError); ok {
+				return true
+			}
+		}
+	case PreInitErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*PreInitError); ok {
+				return true
+			}
+		}
+	case CommandErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*CommandError); ok {
+				return true
+			}
+		}
+	case JobStopContainerErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*JobStopContainerError); ok {
+				return true
+			}
+		}
+	case PendingPhaseTimeoutErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*PendingPhaseTimeoutError); ok {
+				return true
+			}
+		}
+	case CopyErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*CopyError); ok {
+				return true
+			}
+		}
+	case JobUnexpectedErrorType:
+		for _, err := range e.Errs {
+			if _, ok := err.(*JobUnexpectedError); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (e *JobMultiError) Error() string {
+	errs := make([]string, 0, len(e.Errs))
+	for _, err := range e.Errs {
+		errs = append(errs, err.Error())
+	}
+	return strings.Join(errs, ":")
+}
+
 func errPendingPhase(startedAt time.Time, timeout time.Duration) error {
 	return &PendingPhaseTimeoutError{
 		StartedAt: startedAt,
@@ -334,4 +441,10 @@ func errLogStreamInitContainer(err error) error {
 		logStreamErr.InitContainer = true
 	}
 	return err
+}
+
+func errMulti(errs ...error) *JobMultiError {
+	return &JobMultiError{
+		Errs: errs,
+	}
 }

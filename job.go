@@ -187,7 +187,7 @@ func (j *Job) Run(ctx context.Context) (e error) {
 			if e == nil {
 				e = err
 			} else {
-				e = fmt.Errorf(strings.Join([]string{e.Error(), err.Error()}, ":"))
+				e = errMulti(e, err)
 			}
 		}
 	}()
@@ -207,7 +207,6 @@ func (j *Job) Run(ctx context.Context) (e error) {
 	case <-ctx.Done():
 		return nil
 	case err := <-errCh:
-		fmt.Println("errCh<- j.wait(). err = ", err)
 		return err
 	}
 	return nil
@@ -266,7 +265,6 @@ func (j *Job) wait(ctx context.Context) error {
 	defer watcher.Stop()
 
 	if err := j.watchLoop(ctx, watcher); err != nil {
-		fmt.Println("watchLoop. err = ", err)
 		return err
 	}
 	return nil
@@ -316,7 +314,6 @@ func (j *Job) watchPodPendingPhase(ctx context.Context, name string) error {
 		}
 		if j.isPodInitializing(curPod) {
 			onceForPodInitializing.Do(func() {
-				fmt.Println("startedPodInitializing", name)
 				startedPodInitializing = time.Now()
 			})
 			elapsedTime := time.Since(startedPodInitializing)
@@ -370,7 +367,6 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 					continue
 				}
 				if err := j.jobInit.run(pod); err != nil {
-					fmt.Println("jobInit.run err = ", err)
 					return err
 				}
 			}
@@ -394,7 +390,6 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 							finishedRunningPhaseMu.Lock()
 							finishedRunningPhase = true
 							finishedRunningPhaseMu.Unlock()
-							fmt.Println("return doRunningPhase status")
 						}()
 						return j.doRunningPhase(ctx, pod)
 					})
@@ -419,10 +414,8 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 					finishedRunningPhaseMu.Unlock()
 
 					if finished {
-						fmt.Println("return FailedJob")
 						return &FailedJob{Pod: pod}
 					}
-					fmt.Println("return JobUnexpectedError")
 					return &JobUnexpectedError{Pod: pod}
 				}
 				return nil
@@ -432,7 +425,6 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 		return nil
 	})
 	if err := eg.Wait(); err != nil {
-		fmt.Println("eg.Wait() err = ", err)
 		return err
 	}
 	return nil
@@ -444,7 +436,6 @@ func (j *Job) doRunningPhase(ctx context.Context, pod *corev1.Pod) error {
 	}
 	if j.podRunningCallback != nil {
 		if err := j.podRunningCallback(pod); err != nil {
-			fmt.Println("doRunningPhase err = ", err)
 			return err
 		}
 	} else {
