@@ -336,6 +336,7 @@ func (j *jobInit) run(pod *corev1.Pod) error {
 							return fmt.Errorf("job: failed to set corev1.Pod to executor instance: %w", err)
 						}
 						if err := j.handler(exec); err != nil {
+							fmt.Println("return error from jobInit.handler", err)
 							return err
 						}
 						if err := exec.Stop(); err != nil {

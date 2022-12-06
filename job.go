@@ -314,6 +314,7 @@ func (j *Job) watchPodPendingPhase(ctx context.Context, name string) error {
 		}
 		if j.isPodInitializing(curPod) {
 			onceForPodInitializing.Do(func() {
+				fmt.Println("startedPodInitializing", name)
 				startedPodInitializing = time.Now()
 			})
 			elapsedTime := time.Since(startedPodInitializing)
