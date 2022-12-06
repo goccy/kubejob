@@ -219,6 +219,14 @@ func (e *CopyError) Error() string {
 	return fmt.Sprintf("job: failed to copy from %s to %s. %s", e.SrcPath, e.DstPath, e.Err)
 }
 
+type JobUnexpectedError struct {
+	Pod *corev1.Pod
+}
+
+func (e *JobUnexpectedError) Error() string {
+	return fmt.Sprintf("job: pod status became failed without being in running phase: %s", e.Pod.Status.Message)
+}
+
 func errPendingPhase(startedAt time.Time, timeout time.Duration) error {
 	return &PendingPhaseTimeoutError{
 		StartedAt: startedAt,
