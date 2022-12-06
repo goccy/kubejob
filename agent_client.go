@@ -149,11 +149,11 @@ func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error
 }
 
 func (c *AgentClient) copyToWithRetry(ctx context.Context, srcPath, dstPath string) error {
-	const CopyRetryCount = 3
+	const maxCopyRetryCount = 5
 
 	policy := backoff.NewExponential(
 		backoff.WithInterval(1*time.Second),
-		backoff.WithMaxRetries(CopyRetryCount),
+		backoff.WithMaxRetries(maxCopyRetryCount),
 	)
 	b, cancel := policy.Start(ctx)
 	defer cancel()
@@ -166,7 +166,7 @@ func (c *AgentClient) copyToWithRetry(ctx context.Context, srcPath, dstPath stri
 		err = c.copyTo(ctx, srcPath, dstPath)
 		if err != nil {
 			if _, ok := err.(*CopySizeError); ok {
-				fmt.Printf("copy size mismatch: %s retry %d/%d\n", c.addr, retryCount, CopyRetryCount)
+				fmt.Printf("copy size mismatch: %s retry %d/%d\n", c.addr, retryCount, maxCopyRetryCount)
 				retryCount++
 				continue
 			}
