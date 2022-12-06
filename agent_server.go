@@ -74,7 +74,13 @@ func (s *AgentServer) CopyFrom(req *agent.CopyFromRequest, stream agent.Agent_Co
 }
 
 func (s *AgentServer) copyFrom(req *agent.CopyFromRequest, stream agent.Agent_CopyFromServer) error {
-	archivedFilePath, err := archivePath(req.Path)
+	dir, err := os.MkdirTemp("", "kubejob_archive")
+	if err != nil {
+		return fmt.Errorf("job: failed to create temporary directory for archivePath: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	archivedFilePath, err := archivePath(dir, req.Path)
 	if err != nil {
 		return err
 	}

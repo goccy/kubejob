@@ -199,7 +199,12 @@ func (c *AgentClient) copyTo(ctx context.Context, srcPath, dstPath string) error
 		return fmt.Errorf("job: failed to get status of file %s: %w", srcPath, err)
 	}
 
-	archivedFilePath, err := archivePath(srcPath)
+	dir, err := os.MkdirTemp("", "kubejob_archive")
+	if err != nil {
+		return fmt.Errorf("job: failed to create temporary directory for archivePath: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	archivedFilePath, err := archivePath(dir, srcPath)
 	if err != nil {
 		return err
 	}

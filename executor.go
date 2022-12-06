@@ -417,6 +417,7 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 		cancel()
 		return <-errCh
 	case err := <-errCh:
+		fmt.Println("err := <-errCh", err)
 		return err
 	}
 	return nil
@@ -487,11 +488,13 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 			}
 		}()
 		if err := handler(executors); err != nil {
+			fmt.Println("return handler err = ", err)
 			return err
 		}
 		return nil
 	}
 	if err := j.Run(ctx); err != nil {
+		fmt.Println("return Run error", err)
 		return err
 	}
 
