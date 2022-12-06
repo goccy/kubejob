@@ -182,14 +182,6 @@ func (s *AgentServer) Run(ctx context.Context) error {
 	}
 
 	server := grpc.NewServer(
-		/*
-			grpc.KeepaliveEnforcementPolicy(
-				keepalive.EnforcementPolicy{
-					MinTime:             5 * time.Second,
-					PermitWithoutStream: true,
-				},
-			),
-		*/
 		grpc.StreamInterceptor(grpc_auth.StreamServerInterceptor(authFunc)),
 		grpc.UnaryInterceptor(grpc_auth.UnaryServerInterceptor(authFunc)),
 	)

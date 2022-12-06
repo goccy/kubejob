@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/goccy/kubejob/agent"
 	"google.golang.org/grpc"
@@ -21,22 +20,10 @@ type AgentClient struct {
 	addr       string
 }
 
-const (
-	GRPCClientKeepaliveTime    = 30 * time.Second
-	GRPCClientKeepaliveTimeout = 5 * 60 * time.Second
-)
-
 func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, signedToken string) (*AgentClient, error) {
 	ipAddr := agentServerPod.Status.PodIP
 	addr := fmt.Sprintf("%s:%d", ipAddr, listenPort)
 	conn, err := grpc.Dial(addr,
-		/*
-			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Time:                GRPCClientKeepaliveTime,
-				Timeout:             GRPCClientKeepaliveTimeout,
-				PermitWithoutStream: true,
-			}),
-		*/
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithUnaryInterceptor(agentAuthUnaryInterceptor(signedToken)),
@@ -46,7 +33,6 @@ func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, s
 		return nil, fmt.Errorf("job: failed to dial grpc: %w", err)
 	}
 	client := agent.NewAgentClient(conn)
-	fmt.Println("agent-client", fmt.Sprintf("%s:%d", ipAddr, listenPort))
 	return &AgentClient{
 		serverPod:  agentServerPod,
 		workingDir: workingDir,
@@ -110,17 +96,14 @@ func (c *AgentClient) copyFrom(ctx context.Context, srcPath, dstPath string) err
 		Path: srcPath,
 	})
 	if err != nil {
-		fmt.Println("err", fmt.Errorf("job: failed to create grpc stream to copy from pod: %w", err))
 		return fmt.Errorf("job: failed to create grpc stream to copy from pod: %w", err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-		fmt.Println(fmt.Errorf("job: failed to create directory %s: %w", filepath.Dir(dstPath), err))
 		return fmt.Errorf("job: failed to create directory %s: %w", filepath.Dir(dstPath), err)
 	}
 	f, err := os.Create(dstPath)
 	if err != nil {
-		fmt.Println(fmt.Errorf("job: failed to create file %s to copy: %w", dstPath, err))
 		return fmt.Errorf("job: failed to create file %s to copy: %w", dstPath, err)
 	}
 	defer f.Close()
@@ -136,9 +119,6 @@ func (c *AgentClient) copyFrom(ctx context.Context, srcPath, dstPath string) err
 		if _, err := f.Write(copyFromResponse.Data); err != nil {
 			return fmt.Errorf("job: failed to write data: %w", err)
 		}
-	}
-	if err := stream.CloseSend(); err != nil {
-		return fmt.Errorf("job: failed to close send request: %w", err)
 	}
 	return nil
 }

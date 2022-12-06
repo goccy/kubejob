@@ -174,7 +174,6 @@ func agentAuthStreamInterceptor(signedToken string) grpc.StreamClientInterceptor
 
 func archivePath(baseDir string, targetPath string) (string, error) {
 	archivedFilePath := filepath.Join(baseDir, fmt.Sprintf("%s.tar", filepath.Base(targetPath)))
-	fmt.Println("archivedFilePath = ", archivedFilePath)
 	dst, err := os.Create(archivedFilePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create archive file %s: %w", archivedFilePath, err)
