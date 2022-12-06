@@ -19,6 +19,7 @@ type AgentClient struct {
 	serverPod  *corev1.Pod
 	workingDir string
 	client     agent.AgentClient
+	addr       string
 }
 
 const (
@@ -28,7 +29,8 @@ const (
 
 func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, signedToken string) (*AgentClient, error) {
 	ipAddr := agentServerPod.Status.PodIP
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", ipAddr, listenPort),
+	addr := fmt.Sprintf("%s:%d", ipAddr, listenPort)
+	conn, err := grpc.Dial(addr,
 		/*
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                GRPCClientKeepaliveTime,
@@ -50,6 +52,7 @@ func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, s
 		serverPod:  agentServerPod,
 		workingDir: workingDir,
 		client:     client,
+		addr:       addr,
 	}, nil
 }
 
@@ -152,7 +155,7 @@ func (c *AgentClient) copyToWithRetry(ctx context.Context, srcPath, dstPath stri
 		backoff.WithInterval(1*time.Second),
 		backoff.WithMaxRetries(CopyRetryCount),
 	)
-	b, cancel := policy.Start(context.Background())
+	b, cancel := policy.Start(ctx)
 	defer cancel()
 
 	var (
@@ -163,10 +166,13 @@ func (c *AgentClient) copyToWithRetry(ctx context.Context, srcPath, dstPath stri
 		err = c.copyTo(ctx, srcPath, dstPath)
 		if err != nil {
 			if _, ok := err.(*CopySizeError); ok {
-				fmt.Printf("copy size mismatch. retry %d/%d\n", retryCount, CopyRetryCount)
+				fmt.Printf("copy size mismatch: %s retry %d/%d\n", c.addr, retryCount, CopyRetryCount)
 				retryCount++
 				continue
 			}
+		}
+		if retryCount > 0 && err == nil {
+			fmt.Printf("recover copy error: %s\n", c.addr)
 		}
 		break
 	}
