@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/goccy/kubejob/agent"
-	"github.com/lestrrat-go/backoff"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
@@ -145,50 +144,6 @@ func (c *AgentClient) copyFrom(ctx context.Context, srcPath, dstPath string) err
 }
 
 func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error {
-	return c.copyToWithRetry(ctx, srcPath, dstPath)
-}
-
-func (c *AgentClient) copyToWithRetry(ctx context.Context, srcPath, dstPath string) error {
-	const maxCopyRetryCount = 5
-
-	policy := backoff.NewExponential(
-		backoff.WithInterval(1*time.Second),
-		backoff.WithMaxRetries(maxCopyRetryCount),
-	)
-	b, cancel := policy.Start(ctx)
-	defer cancel()
-
-	var (
-		retryCount int
-		err        error
-	)
-	for backoff.Continue(b) {
-		err = c.copyTo(ctx, srcPath, dstPath)
-		if err != nil {
-			if _, ok := err.(*CopySizeError); ok {
-				fmt.Printf("copy size mismatch: %s retry %d/%d\n", c.addr, retryCount, maxCopyRetryCount)
-				retryCount++
-				continue
-			}
-		}
-		if retryCount > 0 && err == nil {
-			fmt.Printf("recover copy error: %s\n", c.addr)
-		}
-		break
-	}
-	return err
-}
-
-type CopySizeError struct {
-	expected int64
-	actual   int64
-}
-
-func (e *CopySizeError) Error() string {
-	return fmt.Sprintf("job: mismatch copied length. expected size %d but got copied size %d", e.expected, e.actual)
-}
-
-func (c *AgentClient) copyTo(ctx context.Context, srcPath, dstPath string) error {
 	stream, err := c.client.CopyTo(ctx)
 	if err != nil {
 		return fmt.Errorf("job: failed to create grpc stream to copy to pod: %w", err)
@@ -244,7 +199,7 @@ func (c *AgentClient) copyTo(ctx context.Context, srcPath, dstPath string) error
 		return fmt.Errorf("job: failed to recv data with grpc stream: %w", err)
 	}
 	if resp.CopiedLength != finfo.Size() {
-		return &CopySizeError{expected: finfo.Size(), actual: resp.CopiedLength}
+		return fmt.Errorf("job: mismatch copied length. expected size %d but got copied size %d", finfo.Size(), resp.CopiedLength)
 	}
 	return nil
 }
