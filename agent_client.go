@@ -17,11 +17,13 @@ type AgentClient struct {
 	serverPod  *corev1.Pod
 	workingDir string
 	client     agent.AgentClient
+	addr       string
 }
 
 func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, signedToken string) (*AgentClient, error) {
 	ipAddr := agentServerPod.Status.PodIP
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", ipAddr, listenPort),
+	addr := fmt.Sprintf("%s:%d", ipAddr, listenPort)
+	conn, err := grpc.Dial(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithUnaryInterceptor(agentAuthUnaryInterceptor(signedToken)),
@@ -35,6 +37,7 @@ func NewAgentClient(agentServerPod *corev1.Pod, listenPort uint16, workingDir, s
 		serverPod:  agentServerPod,
 		workingDir: workingDir,
 		client:     client,
+		addr:       addr,
 	}, nil
 }
 
@@ -131,7 +134,12 @@ func (c *AgentClient) CopyTo(ctx context.Context, srcPath, dstPath string) error
 		return fmt.Errorf("job: failed to get status of file %s: %w", srcPath, err)
 	}
 
-	archivedFilePath, err := archivePath(srcPath)
+	dir, err := os.MkdirTemp("", "kubejob_archive")
+	if err != nil {
+		return fmt.Errorf("job: failed to create temporary directory for archivePath: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	archivedFilePath, err := archivePath(dir, srcPath)
 	if err != nil {
 		return err
 	}
