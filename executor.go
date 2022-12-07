@@ -431,7 +431,7 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 		if j.agentCfg != nil && j.agentCfg.Enabled(container.Name) {
 			port, err := j.agentCfg.NewAllocatedPort()
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to allocate a new port for agent: %w", err)
 			}
 			agentPort = port
 			replaceCommandByAgentCommand(&j.Job.Spec.Template.Spec.Containers[idx], j.agentCfg.InstalledPath(container.Name), port)

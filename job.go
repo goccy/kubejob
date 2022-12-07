@@ -187,7 +187,7 @@ func (j *Job) Run(ctx context.Context) (e error) {
 			if e == nil {
 				e = err
 			} else {
-				e = fmt.Errorf(strings.Join([]string{e.Error(), err.Error()}, ":"))
+				e = errMulti(e, err)
 			}
 		}
 	}()
@@ -199,7 +199,7 @@ func (j *Job) Run(ctx context.Context) (e error) {
 		}
 	}()
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error)
 	go func() {
 		errCh <- j.wait(ctx)
 	}()
@@ -336,9 +336,11 @@ func (j *Job) isReadyAllContainers(status corev1.PodStatus) bool {
 
 func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) {
 	var (
-		eg                    errgroup.Group
-		once                  sync.Once
-		onceWatchPendingPhase sync.Once
+		eg                     errgroup.Group
+		finishedRunningPhase   bool
+		finishedRunningPhaseMu sync.Mutex
+		once                   sync.Once
+		onceWatchPendingPhase  sync.Once
 	)
 	eg.Go(func() error {
 		var phase corev1.PodPhase
@@ -384,19 +386,12 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 				}
 				once.Do(func() {
 					eg.Go(func() error {
-						if err := j.logStreamInitContainers(ctx, pod); err != nil {
-							return err
-						}
-						if j.podRunningCallback != nil {
-							if err := j.podRunningCallback(pod); err != nil {
-								return err
-							}
-						} else {
-							if err := j.logStreamPod(ctx, pod); err != nil {
-								return err
-							}
-						}
-						return nil
+						defer func() {
+							finishedRunningPhaseMu.Lock()
+							finishedRunningPhase = true
+							finishedRunningPhaseMu.Unlock()
+						}()
+						return j.doRunningPhase(ctx, pod)
 					})
 				})
 			case corev1.PodSucceeded, corev1.PodFailed:
@@ -414,7 +409,14 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 					})
 				})
 				if pod.Status.Phase == corev1.PodFailed {
-					return &FailedJob{Pod: pod}
+					finishedRunningPhaseMu.Lock()
+					finished := finishedRunningPhase
+					finishedRunningPhaseMu.Unlock()
+
+					if finished {
+						return &FailedJob{Pod: pod}
+					}
+					return &JobUnexpectedError{Pod: pod}
 				}
 				return nil
 			}
@@ -424,6 +426,22 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 	})
 	if err := eg.Wait(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (j *Job) doRunningPhase(ctx context.Context, pod *corev1.Pod) error {
+	if err := j.logStreamInitContainers(ctx, pod); err != nil {
+		return err
+	}
+	if j.podRunningCallback != nil {
+		if err := j.podRunningCallback(pod); err != nil {
+			return err
+		}
+	} else {
+		if err := j.logStreamPod(ctx, pod); err != nil {
+			return err
+		}
 	}
 	return nil
 }
