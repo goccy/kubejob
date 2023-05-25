@@ -74,6 +74,7 @@ type Job struct {
 	jobInit                  *jobInit
 	pendingTimeout           *time.Duration
 	agentCfg                 *AgentConfig
+	propagationPolicy        *metav1.DeletionPropagation
 }
 
 type ContainerLogger func(*ContainerLog)
@@ -120,11 +121,16 @@ func (j *Job) DisableCommandLog() {
 	j.disabledCommandLog = true
 }
 
+func (j *Job) SetDeletePropagationPolicy(propagation metav1.DeletionPropagation) {
+	j.propagationPolicy = &propagation
+}
+
 func (j *Job) cleanup(ctx context.Context) error {
 	j.logDebug("cleanup job %s", j.Name)
 	errs := []error{}
 	if err := j.jobClient.Delete(ctx, j.Name, metav1.DeleteOptions{
 		GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
+		PropagationPolicy:  j.propagationPolicy,
 	}); err != nil {
 		errs = append(errs, fmt.Errorf("failed to delete job: %w", err))
 	}
