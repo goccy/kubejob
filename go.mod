@@ -11,7 +11,7 @@ require (
 	github.com/rs/xid v1.2.1
 	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
 	google.golang.org/grpc v1.47.0
-	google.golang.org/protobuf v1.28.1
+	google.golang.org/protobuf v1.31.0
 	k8s.io/api v0.27.1
 	k8s.io/apimachinery v0.27.1
 	k8s.io/client-go v0.27.1
