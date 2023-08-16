@@ -1,4 +1,4 @@
-FROM golang:1.17-stretch
+FROM golang:1.21-stretch
 
 ENV GOPATH /go
 WORKDIR /go/src/github.com/goccy/kubejob
