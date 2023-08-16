@@ -110,12 +110,14 @@ func (b *JobBuilder) BuildWithJob(jobSpec *batchv1.Job) (*Job, error) {
 		jobSpec.Spec.Template.Labels = map[string]string{}
 	}
 	jobSpec.Spec.Template.Labels[SelectorLabel] = b.labelID()
+	propagationPolicy := metav1.DeletePropagationOrphan
 
 	return &Job{
-		Job:        jobSpec,
-		jobClient:  jobClient,
-		podClient:  podClient,
-		restClient: restClient,
-		config:     b.config,
+		Job:               jobSpec,
+		jobClient:         jobClient,
+		podClient:         podClient,
+		restClient:        restClient,
+		config:            b.config,
+		propagationPolicy: &propagationPolicy,
 	}, nil
 }

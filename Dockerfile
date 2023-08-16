@@ -1,4 +1,4 @@
-FROM golang:1.17-stretch
+FROM golang:1.21.0-bookworm
 
 ENV GOPATH /go
 WORKDIR /go/src/github.com/goccy/kubejob
@@ -11,6 +11,6 @@ COPY . .
 
 RUN go build -o /go/bin/kubejob-agent cmd/kubejob-agent/main.go
 
-FROM gcr.io/distroless/base:debug AS agent
+FROM golang:1.21.0-bookworm AS agent
 
 COPY --from=0 /go/bin/kubejob-agent /bin/kubejob-agent
