@@ -27,8 +27,8 @@ deploy: cluster/create deploy/image
 	kubectl apply -f testdata/config/manifest.yaml
 
 deploy/image:
-	docker build --progress plain -f Dockerfile --target agent . -t kubejob:latest
-	$(GOBIN)/kind load docker-image --name $(CLUSTER_NAME) kubejob:latest
+	docker build --progress plain -f Dockerfile --target agent . -t 'kubejob:latest'
+	$(GOBIN)/kind load docker-image --name $(CLUSTER_NAME) 'kubejob:latest'
 
 wait:
 	{ \
