@@ -11,6 +11,6 @@ COPY . .
 
 RUN go build -o /go/bin/kubejob-agent cmd/kubejob-agent/main.go
 
-FROM gcr.io/distroless/base:debug AS agent
+FROM golang:1.21.0-bookworm AS agent
 
 COPY --from=0 /go/bin/kubejob-agent /bin/kubejob-agent
