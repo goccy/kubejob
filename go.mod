@@ -9,7 +9,7 @@ require (
 	github.com/lestrrat-go/backoff v1.0.1
 	github.com/lestrrat-go/jwx/v2 v2.0.2
 	github.com/rs/xid v1.2.1
-	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
+	golang.org/x/sync v0.3.0
 	google.golang.org/grpc v1.47.0
 	google.golang.org/protobuf v1.28.1
 	k8s.io/api v0.27.1
