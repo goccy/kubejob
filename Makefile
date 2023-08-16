@@ -23,7 +23,7 @@ cluster/create: kind/install
 cluster/delete: kind/install
 	$(GOBIN)/kind delete clusters $(CLUSTER_NAME)
 
-deploy: test-cluster deploy/image
+deploy: cluster/create deploy/image
 	kubectl apply -f testdata/config/manifest.yaml
 
 deploy/image:
