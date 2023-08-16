@@ -1,40 +1,34 @@
 SHELL := /bin/bash
 
-BIN := $(CURDIR)/.bin
-PATH := $(abspath $(BIN)):$(PATH)
-
-UNAME_OS := $(shell uname -s)
-
-$(BIN):
-	@mkdir -p $(BIN)
-
-KIND := $(BIN)/kind
-KIND_VERSION := v0.11.0
-$(KIND): | $(BIN)
-	@curl -sSLo $(KIND) "https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-$(UNAME_OS)-amd64"
-	@chmod +x $(KIND)
+GOBIN := $(PWD)/bin
+PATH := $(GOBIN):$(PATH)
 
 CLUSTER_NAME ?= kubejob-cluster
 KUBECONFIG ?= $(CURDIR)/.kube/config
 export KUBECONFIG
 
-test-cluster: $(KIND)
+KIND_VERSION := v0.20.0
+
+kind/install:
+	GOBIN=$(GOBIN) go install sigs.k8s.io/kind@$(KIND_VERSION)
+
+cluster/create: kind/install
 	@{ \
 	set -e ;\
 	if [ "$$(kind get clusters --quiet | grep $(CLUSTER_NAME))" = "" ]; then \
-		$(KIND) create cluster --name $(CLUSTER_NAME) --config testdata/config/cluster.yaml ;\
+		$(GOBIN)/kind create cluster --name $(CLUSTER_NAME) --config testdata/config/cluster.yaml ;\
 	fi ;\
 	}
 
-delete-cluster: $(KIND)
-	$(KIND) delete clusters $(CLUSTER_NAME)
+cluster/delete: kind/install
+	$(GOBIN)/kind delete clusters $(CLUSTER_NAME)
 
 deploy: test-cluster deploy/image
 	kubectl apply -f testdata/config/manifest.yaml
 
 deploy/image:
 	docker build --progress plain -f Dockerfile --target agent . -t kubejob:latest
-	kind load docker-image --name $(CLUSTER_NAME) kubejob:latest
+	$(GOBIN)/kind load docker-image --name $(CLUSTER_NAME) kubejob:latest
 
 wait:
 	{ \
