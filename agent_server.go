@@ -24,6 +24,7 @@ var _ agent.AgentServer = &AgentServer{}
 const defaultStreamFileChunkSize = 1024 // 1KB
 
 type AgentServer struct {
+	*agent.UnimplementedAgentServer
 	port   uint16
 	stopCh chan struct{}
 }
