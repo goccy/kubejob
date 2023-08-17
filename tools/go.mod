@@ -1,6 +1,6 @@
 module github.com/goccy/kubejob/tools
 
-go 1.20.0
+go 1.20
 
 require (
 	github.com/bufbuild/buf v1.26.1
