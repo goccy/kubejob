@@ -6,13 +6,17 @@ PATH := $(GOBIN):$(PATH)
 CLUSTER_NAME ?= kubejob-cluster
 KUBECONFIG ?= $(CURDIR)/.kube/config
 export KUBECONFIG
+export GOBIN
 
-KIND_VERSION := v0.20.0
+.PHONY: tools
+tools:
+	cd tools && GOFLAGS='-mod=readonly' go install \
+		sigs.k8s.io/kind \
+		github.com/bufbuild/buf/cmd/buf \
+		google.golang.org/protobuf/cmd/protoc-gen-go \
+		google.golang.org/grpc/cmd/protoc-gen-go-grpc
 
-kind/install:
-	GOBIN=$(GOBIN) go install sigs.k8s.io/kind@$(KIND_VERSION)
-
-cluster/create: kind/install
+cluster/create: tools
 	@{ \
 	set -e ;\
 	if [ "$$(kind get clusters --quiet | grep $(CLUSTER_NAME))" = "" ]; then \
@@ -23,6 +27,7 @@ cluster/create: kind/install
 cluster/delete: kind/install
 	$(GOBIN)/kind delete clusters $(CLUSTER_NAME)
 
+.PHONY: deploy
 deploy: cluster/create deploy/image
 	kubectl apply -f testdata/config/manifest.yaml
 
@@ -30,6 +35,7 @@ deploy/image:
 	docker build --progress plain -f Dockerfile --target agent . -t 'kubejob:latest'
 	$(GOBIN)/kind load docker-image --name $(CLUSTER_NAME) 'kubejob:latest'
 
+.PHONY: wait
 wait:
 	{ \
 	set -e ;\
@@ -42,6 +48,7 @@ wait:
 	done; \
 	}
 
+.PHONY: test
 test:
 	{ \
 	set -e ;\
@@ -55,6 +62,7 @@ test:
 	done; \
 	}
 
+.PHONY: test-run
 test-run:
 	{ \
 	set -e ;\
@@ -68,7 +76,8 @@ test-run:
 	done; \
 	}
 
-generate: proto-gen
+.PHONY: generate
+generate: generate/buf
 
-proto-gen:
-	protoc ./agent/agent.proto --go_out=plugins=grpc:.
+generate/buf:
+	$(GOBIN)/buf generate
