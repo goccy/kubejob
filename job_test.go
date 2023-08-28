@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/kubejob"
 	batchv1 "k8s.io/api/batch/v1"
 	apiv1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 )
@@ -256,7 +257,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 						}
 					}
 					return nil
-				}); err != nil {
+				}, nil); err != nil {
 					t.Fatalf("failed to run: %+v", err)
 				}
 			})
@@ -313,7 +314,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 						}
 					}
 					return nil
-				}); err == nil {
+				}, nil); err == nil {
 					t.Fatal("expect error")
 				}
 			})
@@ -371,7 +372,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 						}
 					}
 					return nil
-				}); err == nil {
+				}, nil); err == nil {
 					t.Fatal("expect error")
 				}
 			})
@@ -439,7 +440,7 @@ func Test_RunnerWithInitContainers(t *testing.T) {
 			}
 		}
 		return nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
 }
@@ -519,7 +520,7 @@ func Test_RunnerWithPreInit(t *testing.T) {
 			}
 		}
 		return nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
 }
@@ -616,7 +617,7 @@ func Test_RunnerWithInitExecutionHandler(t *testing.T) {
 			}
 		}
 		return nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
 	if calledInitNum != 2 {
@@ -665,6 +666,22 @@ func Test_RunnerWithSideCar(t *testing.T) {
 				}
 			}
 			return nil
+		}, &kubejob.JobFinalizer{
+			Container: corev1.Container{
+				Name:    "finalizer",
+				Image:   goImageName,
+				Command: []string{"echo", "finalizer"},
+			},
+			Handler: func(exec *kubejob.JobExecutor) error {
+				out, err := exec.Exec()
+				if err != nil {
+					t.Fatalf("%s: %+v", string(out), err)
+				}
+				if string(out) != "finalizer\n" {
+					t.Fatalf("failed to get output from finalizer: %q", string(out))
+				}
+				return nil
+			},
 		}); err != nil {
 			t.Fatalf("failed to run: %+v", err)
 		}
@@ -721,7 +738,7 @@ func Test_RunnerWithSideCar(t *testing.T) {
 				}
 			}
 			return nil
-		}); err == nil {
+		}, nil); err == nil {
 			t.Fatal("expect error")
 		}
 	})
@@ -753,7 +770,7 @@ func Test_RunnerWithCancel(t *testing.T) {
 	if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor) error {
 		cancel()
 		return nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("%+v", err)
 	}
 }
@@ -844,7 +861,7 @@ func Test_RunnerWithAgent(t *testing.T) {
 			}
 		}
 		return nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("failed to run: %+v", err)
 	}
 }
@@ -900,7 +917,7 @@ ln -s /tmp/symfile /tmp/artifacts/symfile
 				return fmt.Errorf("failed to copy: %w", err)
 			}
 			return executors[0].Stop()
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("%+v", err)
 		}
 		content, err := os.ReadFile(filepath.Join(dir, "artifacts", "artifact.txt"))
@@ -973,7 +990,7 @@ ln -s /tmp/symfile /tmp/artifacts/symfile
 				t.Fatalf("invalid content: expected hello but got %s", string(out))
 			}
 			return nil
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("%+v", err)
 		}
 	})
@@ -1035,7 +1052,7 @@ echo -n "hello" > /tmp/artifact.txt
 				return fmt.Errorf("failed to copy: %w", err)
 			}
 			return executors[0].Stop()
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("%+v", err)
 		}
 		content, err := os.ReadFile(filepath.Join(dir, "artifact.txt"))
@@ -1098,7 +1115,7 @@ echo -n "hello" > /tmp/artifact.txt
 				t.Fatalf("invalid content: expected hello but got %s", string(out))
 			}
 			return nil
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("%+v", err)
 		}
 	})
