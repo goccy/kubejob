@@ -128,10 +128,10 @@ func (j *Job) SetDeletePropagationPolicy(propagation metav1.DeletionPropagation)
 }
 
 func (j *Job) cleanup(ctx context.Context) error {
+	j.logDebug("cleanup job %s", j.Name)
 	if !j.enableJobDeletion {
 		return nil
 	}
-	j.logDebug("cleanup job %s", j.Name)
 	if err := j.jobClient.Delete(ctx, j.Name, metav1.DeleteOptions{
 		GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
 		PropagationPolicy:  j.propagationPolicy,
@@ -520,7 +520,7 @@ func (j *Job) logStreamContainer(ctx context.Context, pod *corev1.Pod, container
 		j.containerLogs <- j.commandLog(pod, container)
 	}
 
-	errchan := make(chan error, 1)
+	errchan := make(chan error)
 
 	go func() {
 		reader := bufio.NewReader(stream)
