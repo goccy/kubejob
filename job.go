@@ -122,11 +122,8 @@ func (j *Job) DisableCommandLog() {
 	j.disabledCommandLog = true
 }
 
-func (j *Job) EnableJobDeletion() {
-	j.enableJobDeletion = true
-}
-
 func (j *Job) SetDeletePropagationPolicy(propagation metav1.DeletionPropagation) {
+	j.enableJobDeletion = true
 	j.propagationPolicy = &propagation
 }
 
