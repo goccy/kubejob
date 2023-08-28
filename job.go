@@ -63,6 +63,7 @@ type Job struct {
 	containerLogs            chan *ContainerLog
 	logger                   Logger
 	containerLogger          ContainerLogger
+	enableJobDeletion        bool
 	disabledInitContainerLog bool
 	disabledInitCommandLog   bool
 	disabledContainerLog     bool
@@ -121,44 +122,24 @@ func (j *Job) DisableCommandLog() {
 	j.disabledCommandLog = true
 }
 
+func (j *Job) EnableJobDeletion() {
+	j.enableJobDeletion = true
+}
+
 func (j *Job) SetDeletePropagationPolicy(propagation metav1.DeletionPropagation) {
 	j.propagationPolicy = &propagation
 }
 
 func (j *Job) cleanup(ctx context.Context) error {
+	if !j.enableJobDeletion {
+		return nil
+	}
 	j.logDebug("cleanup job %s", j.Name)
-	errs := []error{}
 	if err := j.jobClient.Delete(ctx, j.Name, metav1.DeleteOptions{
 		GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
 		PropagationPolicy:  j.propagationPolicy,
 	}); err != nil {
-		errs = append(errs, fmt.Errorf("failed to delete job: %w", err))
-	}
-	j.logDebug("search by %s", j.labelSelector())
-	podList, err := j.podClient.List(ctx, metav1.ListOptions{
-		LabelSelector: j.labelSelector(),
-	})
-	if err != nil {
-		errs = append(errs, fmt.Errorf("failed to list pod: %w", err))
-	}
-	if podList == nil || len(podList.Items) == 0 {
-		j.logWarn("could not find pod to remove")
-		if len(errs) > 0 {
-			return errCleanup(j.Name, errs)
-		}
-		return nil
-	}
-	j.logDebug("%d pods found", len(podList.Items))
-	for _, pod := range podList.Items {
-		j.logDebug("delete pod: %s job-id: %s", pod.Name, pod.Labels[SelectorLabel])
-		if err := j.podClient.Delete(ctx, pod.Name, metav1.DeleteOptions{
-			GracePeriodSeconds: new(int64), // assign zero value as GracePeriodSeconds to delete immediately.
-		}); err != nil {
-			errs = append(errs, fmt.Errorf("failed to delete pod %s: %w", pod.Name, err))
-		}
-	}
-	if len(errs) > 0 {
-		return errCleanup(j.Name, errs)
+		return err
 	}
 	return nil
 }
