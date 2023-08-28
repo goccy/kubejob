@@ -404,11 +404,25 @@ func (j *Job) UseAgent(agentCfg *AgentConfig) {
 
 type JobExecutionHandler func([]*JobExecutor) error
 
-func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler) error {
+type JobFinalizerHandler func(*JobExecutor) error
+
+type JobFinalizer struct {
+	Container corev1.Container
+	Handler   JobFinalizerHandler
+}
+
+// RunWithExecutionHandler allows control timing the container commands are executed.
+//
+// finalizer: specify the container to call after executing JobExecutionHandler.
+// If a sidecar is explicitly specified, it can be stopped after the execution handler has finished, but this will not work if an injected container is present.
+// If SetDeletePropagationPolicy is set, kubejob itself deletes the Pod by the forced termination process, so the Job can be terminated even if an injected container exists.
+// However, if kubejob itself does not delete Pods, the forced termination process cannot be executed either.
+// Therefore, by specifying the finalizer container, you can explicitly terminate the injected container.
+func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler, finalizer *JobFinalizer) error {
 	childCtx, cancel := context.WithCancel(ctx)
 	errCh := make(chan error)
 	go func() {
-		errCh <- j.runWithExecutionHandler(childCtx, cancel, handler)
+		errCh <- j.runWithExecutionHandler(childCtx, cancel, handler, finalizer)
 	}()
 	select {
 	case <-ctx.Done():
@@ -421,36 +435,23 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 	return nil
 }
 
-func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), handler JobExecutionHandler) error {
+func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), handler JobExecutionHandler, finalizer *JobFinalizer) error {
 	executorMap := map[string]*JobExecutor{}
 	for idx := range j.Job.Spec.Template.Spec.Containers {
-		container := j.Job.Spec.Template.Spec.Containers[idx]
-		command := container.Command
-		args := container.Args
-		var agentPort uint16
-		if j.agentCfg != nil && j.agentCfg.Enabled(container.Name) {
-			port, err := j.agentCfg.NewAllocatedPort()
-			if err != nil {
-				return fmt.Errorf("failed to allocate a new port for agent: %w", err)
-			}
-			agentPort = port
-			replaceCommandByAgentCommand(&j.Job.Spec.Template.Spec.Containers[idx], j.agentCfg.InstalledPath(container.Name), port)
-			j.Job.Spec.Template.Spec.Containers[idx].Env = append(
-				j.Job.Spec.Template.Spec.Containers[idx].Env,
-				j.agentCfg.PublicKeyEnv(),
-			)
-		} else {
-			replaceCommandByJobTemplate(&j.Job.Spec.Template.Spec.Containers[idx])
+		executor, err := j.containerToJobExecutor(idx, &j.Job.Spec.Template.Spec.Containers[idx])
+		if err != nil {
+			return err
 		}
-		executorMap[container.Name] = &JobExecutor{
-			Container:    container,
-			ContainerIdx: idx,
-			command:      command,
-			args:         args,
-			job:          j,
-			agentCfg:     j.agentCfg,
-			agentPort:    agentPort,
+		executorMap[j.Job.Spec.Template.Spec.Containers[idx].Name] = executor
+	}
+	var finalizerExecutor *JobExecutor
+	if finalizer != nil {
+		executor, err := j.containerToJobExecutor(len(j.Job.Spec.Template.Spec.Containers), &finalizer.Container)
+		if err != nil {
+			return err
 		}
+		finalizerExecutor = executor
+		j.Job.Spec.Template.Spec.Containers = append(j.Job.Spec.Template.Spec.Containers, finalizer.Container)
 	}
 	j.DisableCommandLog()
 	existsErrContainer := false
@@ -471,6 +472,11 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 				forceStop = true
 			}
 		}
+		if finalizerExecutor != nil {
+			if err := finalizerExecutor.setPod(pod); err != nil {
+				return fmt.Errorf("failed to set corev1.Pod to finalizer executor instance: %w", err)
+			}
+		}
 		defer func() {
 			for _, executor := range executors {
 				if executor.err != nil {
@@ -479,6 +485,17 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 				if err := executor.Stop(); err != nil {
 					j.logWarn("failed to stop %s", err)
 					forceStop = true
+				}
+			}
+			if finalizerExecutor != nil {
+				if finalizer.Handler != nil {
+					if err := finalizer.Handler(finalizerExecutor); err != nil {
+						j.logWarn("failed to finalize: %s", err)
+					}
+				} else {
+					if _, err := finalizerExecutor.Exec(); err != nil {
+						j.logWarn("failed to finalize: %s", err)
+					}
 				}
 			}
 			if forceStop {
@@ -500,4 +517,32 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 		return &FailedJob{Pod: callbackPod}
 	}
 	return nil
+}
+
+func (j *Job) containerToJobExecutor(idx int, container *corev1.Container) (*JobExecutor, error) {
+	orgContainer := *container
+	command := container.Command
+	args := container.Args
+
+	var agentPort uint16
+	if j.agentCfg != nil && j.agentCfg.Enabled(container.Name) {
+		port, err := j.agentCfg.NewAllocatedPort()
+		if err != nil {
+			return nil, fmt.Errorf("failed to allocate a new port for agent: %w", err)
+		}
+		agentPort = port
+		replaceCommandByAgentCommand(container, j.agentCfg.InstalledPath(container.Name), port)
+		container.Env = append(container.Env, j.agentCfg.PublicKeyEnv())
+	} else {
+		replaceCommandByJobTemplate(container)
+	}
+	return &JobExecutor{
+		Container:    orgContainer,
+		ContainerIdx: idx,
+		command:      command,
+		args:         args,
+		job:          j,
+		agentCfg:     j.agentCfg,
+		agentPort:    agentPort,
+	}, nil
 }
