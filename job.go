@@ -74,6 +74,7 @@ type Job struct {
 	preInit                  *preInit
 	jobInit                  *jobInit
 	pendingTimeout           *time.Duration
+	watchTimeoutSecond       *int64
 	agentCfg                 *AgentConfig
 	propagationPolicy        *metav1.DeletionPropagation
 }
@@ -120,6 +121,9 @@ func (j *Job) DisableContainerLog() {
 
 func (j *Job) DisableCommandLog() {
 	j.disabledCommandLog = true
+}
+func (j *Job) SetWatchTimeoutSecond(watchTimeoutSecond int64) {
+	j.watchTimeoutSecond = &watchTimeoutSecond
 }
 
 func (j *Job) SetDeletePropagationPolicy(propagation metav1.DeletionPropagation) {
@@ -239,6 +243,13 @@ func (j *Job) getPod(ctx context.Context, name string) (*corev1.Pod, error) {
 }
 
 func (j *Job) wait(ctx context.Context) error {
+	listOptions := metav1.ListOptions{
+		LabelSelector: j.labelSelector(),
+		Watch:         true,
+	}
+	if j.watchTimeoutSecond != nil {
+		listOptions.TimeoutSeconds = j.watchTimeoutSecond
+	}
 	watcher, err := j.podClient.Watch(ctx, metav1.ListOptions{
 		LabelSelector: j.labelSelector(),
 		Watch:         true,
