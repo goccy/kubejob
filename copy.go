@@ -20,7 +20,7 @@ import (
 )
 
 // CopyToPod copy directory or files to specified path on Pod.
-func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
+func (e *JobExecutor) CopyToPod(ctx context.Context, srcPath, dstPath string) error {
 	if e.stopped {
 		return fmt.Errorf("job: failed to copy to pod. pod is already stopped")
 	}
@@ -31,7 +31,7 @@ func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
 		return errCopy(srcPath, dstPath, fmt.Errorf("%s doesn't exist in local filesystem", srcPath))
 	}
 	if e.EnabledAgent() {
-		return e.agentClient.CopyTo(context.Background(), srcPath, dstPath)
+		return e.agentClient.CopyTo(ctx, srcPath, dstPath)
 	}
 
 	// trim slash as the last character
@@ -39,7 +39,7 @@ func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
 		dstPath = dstPath[:len(dstPath)-1]
 	}
 
-	if _, err := e.exec([]string{"test", "-d", dstPath}); err == nil {
+	if _, err := e.exec(ctx, []string{"test", "-d", dstPath}); err == nil {
 		// if dstPath is directory, copy specified src into it.
 		dstPath = filepath.Join(dstPath, path.Base(srcPath))
 	}
@@ -81,7 +81,7 @@ func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
 		outCapturer bytes.Buffer
 		errCapturer bytes.Buffer
 	)
-	readerErr := exec.Stream(remotecommand.StreamOptions{
+	readerErr := exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdin:  reader,
 		Stdout: &outCapturer,
 		Stderr: &errCapturer,
@@ -103,24 +103,24 @@ func (e *JobExecutor) CopyToPod(srcPath, dstPath string) error {
 }
 
 // CopyFromPod copy directory or files from specified path on Pod.
-func (e *JobExecutor) CopyFromPod(srcPath, dstPath string) error {
+func (e *JobExecutor) CopyFromPod(ctx context.Context, srcPath, dstPath string) error {
 	if e.stopped {
 		return fmt.Errorf("job: failed to copy from pod. pod is already stopped")
 	}
 	if e.EnabledAgent() {
-		return e.agentClient.CopyFrom(context.Background(), srcPath, dstPath)
+		return e.agentClient.CopyFrom(ctx, srcPath, dstPath)
 	}
-	return e.copyFromPodWithRetry(srcPath, dstPath)
+	return e.copyFromPodWithRetry(ctx, srcPath, dstPath)
 }
 
-func (e *JobExecutor) copyFromPodWithRetry(srcPath, dstPath string) error {
+func (e *JobExecutor) copyFromPodWithRetry(ctx context.Context, srcPath, dstPath string) error {
 	const copyRetryCount = 3
 
 	policy := backoff.NewExponential(
 		backoff.WithInterval(1*time.Second),
 		backoff.WithMaxRetries(copyRetryCount),
 	)
-	b, cancel := policy.Start(context.Background())
+	b, cancel := policy.Start(ctx)
 	defer cancel()
 
 	var (
@@ -128,7 +128,7 @@ func (e *JobExecutor) copyFromPodWithRetry(srcPath, dstPath string) error {
 		retryCount int
 	)
 	for backoff.Continue(b) {
-		err = e.copyFromPod(srcPath, dstPath)
+		err = e.copyFromPod(ctx, srcPath, dstPath)
 		if err != nil {
 			if e.isRetryableError(err) {
 				if err := os.RemoveAll(dstPath); err != nil {
@@ -171,7 +171,7 @@ func (e *JobExecutor) isRetryableError(err error) bool {
 	return false
 }
 
-func (e *JobExecutor) copyFromPod(srcPath, dstPath string) error {
+func (e *JobExecutor) copyFromPod(ctx context.Context, srcPath, dstPath string) error {
 	if len(srcPath) == 0 || len(dstPath) == 0 {
 		return errCopyWithEmptyPath(srcPath, dstPath)
 	}
@@ -207,7 +207,7 @@ func (e *JobExecutor) copyFromPod(srcPath, dstPath string) error {
 			writer.Close()
 		}()
 		var errCapturer bytes.Buffer
-		err := exec.Stream(remotecommand.StreamOptions{
+		err := exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 			Stdin:  nil,
 			Stdout: writer,
 			Stderr: &errCapturer,

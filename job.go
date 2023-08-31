@@ -187,17 +187,7 @@ func (j *Job) Run(ctx context.Context) (e error) {
 		}
 	}()
 
-	errCh := make(chan error)
-	go func() {
-		errCh <- j.wait(ctx)
-	}()
-	select {
-	case <-ctx.Done():
-		return nil
-	case err := <-errCh:
-		return err
-	}
-	return nil
+	return j.wait(ctx)
 }
 
 func (j *Job) containerLog(log *ContainerLog) {
@@ -353,7 +343,7 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 				})
 			})
 			if j.preInit.needsToRun(pod.Status) {
-				if err := j.preInit.run(pod); err != nil {
+				if err := j.preInit.run(ctx, pod); err != nil {
 					return err
 				}
 			}
@@ -361,7 +351,7 @@ func (j *Job) watchLoop(ctx context.Context, watcher watch.Interface) (e error) 
 				if j.preInit != nil && !j.preInit.done {
 					continue
 				}
-				if err := j.jobInit.run(pod); err != nil {
+				if err := j.jobInit.run(ctx, pod); err != nil {
 					return err
 				}
 			}

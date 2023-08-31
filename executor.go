@@ -82,9 +82,9 @@ func (e *JobExecutor) normalizeCmd(cmd []string) string {
 	return fmt.Sprintf("%s; %s", strings.Join(vars, ";"), cmdText)
 }
 
-func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
+func (e *JobExecutor) exec(ctx context.Context, cmd []string) ([]byte, error) {
 	if e.EnabledAgent() {
-		result, err := e.agentClient.Exec(context.Background(), cmd, nil)
+		result, err := e.agentClient.Exec(ctx, cmd, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +114,7 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 	r, w := io.Pipe()
 	var writerErr error
 	go func() {
-		writerErr = exec.Stream(remotecommand.StreamOptions{
+		writerErr = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 			Stdin:  nil,
 			Stdout: w,
 			Stderr: w,
@@ -130,7 +130,7 @@ func (e *JobExecutor) exec(cmd []string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
+func (e *JobExecutor) execWithRetry(ctx context.Context, cmd []string) ([]byte, error) {
 	var (
 		out []byte
 		err error
@@ -139,12 +139,12 @@ func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
 		backoff.WithInterval(1*time.Second),
 		backoff.WithMaxRetries(ExecRetryCount),
 	)
-	b, cancel := policy.Start(context.Background())
+	b, cancel := policy.Start(ctx)
 	defer cancel()
 
 	retryCount := 0
 	for backoff.Continue(b) {
-		out, err = e.exec(cmd)
+		out, err = e.exec(ctx, cmd)
 		if err != nil {
 			if cmdErr, ok := err.(*CommandError); ok {
 				if cmdErr.IsExitError() {
@@ -167,13 +167,13 @@ func (e *JobExecutor) execWithRetry(cmd []string) ([]byte, error) {
 	return out, err
 }
 
-func (e *JobExecutor) Exec() ([]byte, error) {
+func (e *JobExecutor) Exec(ctx context.Context) ([]byte, error) {
 	defer func() {
 		if err := e.Stop(); err != nil {
 			e.job.logWarn("%s", err)
 		}
 	}()
-	return e.ExecOnly()
+	return e.ExecOnly(ctx)
 }
 
 func (e *JobExecutor) setIsRunning(isRunning bool) {
@@ -188,7 +188,7 @@ func (e *JobExecutor) IsRunning() bool {
 	return e.isRunning
 }
 
-func (e *JobExecutor) ExecPrepareCommand(cmd []string) ([]byte, error) {
+func (e *JobExecutor) ExecPrepareCommand(ctx context.Context, cmd []string) ([]byte, error) {
 	if e.IsRunning() {
 		return nil, fmt.Errorf("job: failed to run prepare command. main command is already executed")
 	}
@@ -196,14 +196,14 @@ func (e *JobExecutor) ExecPrepareCommand(cmd []string) ([]byte, error) {
 		fmt.Println(strings.Join(cmd, " "))
 	}
 
-	out, err := e.execWithRetry(cmd)
+	out, err := e.execWithRetry(ctx, cmd)
 	if err != nil {
 		return out, err
 	}
 	return out, nil
 }
 
-func (e *JobExecutor) ExecOnly() ([]byte, error) {
+func (e *JobExecutor) ExecOnly(ctx context.Context) ([]byte, error) {
 	if e.IsRunning() {
 		return nil, fmt.Errorf("job: duplicate command error. command is already executed")
 	}
@@ -211,7 +211,7 @@ func (e *JobExecutor) ExecOnly() ([]byte, error) {
 		fmt.Println(strings.Join(append(e.command, e.args...), " "))
 	}
 	e.setIsRunning(true)
-	out, err := e.execWithRetry(append(e.command, e.args...))
+	out, err := e.execWithRetry(ctx, append(e.command, e.args...))
 	e.err = err
 	if err != nil {
 		return out, &FailedJob{Pod: e.Pod, Reason: err}
@@ -219,7 +219,7 @@ func (e *JobExecutor) ExecOnly() ([]byte, error) {
 	return out, nil
 }
 
-func (e *JobExecutor) ExecAsync() error {
+func (e *JobExecutor) ExecAsync(ctx context.Context) error {
 	if e.IsRunning() {
 		return fmt.Errorf("job: duplicate command error. command is already executed")
 	}
@@ -228,7 +228,7 @@ func (e *JobExecutor) ExecAsync() error {
 	}
 	e.setIsRunning(true)
 	go func() {
-		_, err := e.execWithRetry(append(e.command, e.args...))
+		_, err := e.execWithRetry(ctx, append(e.command, e.args...))
 		e.err = err
 		if err := e.Stop(); err != nil {
 			e.job.logWarn("failed to stop async executor: %s", err)
@@ -251,7 +251,7 @@ func (e *JobExecutor) TerminationLog(log string) error {
 	if termMessagePath == "" {
 		termMessagePath = corev1.TerminationMessagePathDefault
 	}
-	if _, err := e.execWithRetry([]string{"echo", log, ">", termMessagePath}); err != nil {
+	if _, err := e.execWithRetry(context.Background(), []string{"echo", log, ">", termMessagePath}); err != nil {
 		return err
 	}
 	return nil
@@ -264,8 +264,11 @@ func (e *JobExecutor) Stop() error {
 	defer func() {
 		e.setIsRunning(false)
 	}()
+
+	// Re-create the context to ensure that the shutdown process is executed.
+	ctx := context.Background()
 	if e.EnabledAgent() {
-		if err := e.agentClient.Stop(context.Background()); err != nil {
+		if err := e.agentClient.Stop(ctx); err != nil {
 			return errStopContainer(err)
 		}
 	} else {
@@ -273,7 +276,7 @@ func (e *JobExecutor) Stop() error {
 		if e.err != nil {
 			status = 1
 		}
-		if _, err := e.execWithRetry([]string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
+		if _, err := e.execWithRetry(ctx, []string{"echo", fmt.Sprint(status), ">", "/tmp/kubejob-status"}); err != nil {
 			return errStopContainer(err)
 		}
 	}
@@ -281,7 +284,7 @@ func (e *JobExecutor) Stop() error {
 	return nil
 }
 
-type JobInitContainerExecutionHandler func(*JobExecutor) error
+type JobInitContainerExecutionHandler func(context.Context, *JobExecutor) error
 
 type jobInit struct {
 	done                     bool
@@ -319,7 +322,7 @@ func (j *jobInit) isReplacedCommand(c corev1.Container) bool {
 	return c.Args[0] == jobCommandTemplate
 }
 
-func (j *jobInit) run(pod *corev1.Pod) error {
+func (j *jobInit) run(ctx context.Context, pod *corev1.Pod) error {
 	if j.done {
 		return nil
 	}
@@ -335,7 +338,7 @@ func (j *jobInit) run(pod *corev1.Pod) error {
 						if err := exec.setPod(pod); err != nil {
 							return fmt.Errorf("job: failed to set corev1.Pod to executor instance: %w", err)
 						}
-						if err := j.handler(exec); err != nil {
+						if err := j.handler(ctx, exec); err != nil {
 							return err
 						}
 						if err := exec.Stop(); err != nil {
@@ -402,9 +405,9 @@ func (j *Job) UseAgent(agentCfg *AgentConfig) {
 	j.agentCfg = agentCfg
 }
 
-type JobExecutionHandler func([]*JobExecutor) error
+type JobExecutionHandler func(context.Context, []*JobExecutor) error
 
-type JobFinalizerHandler func(*JobExecutor) error
+type JobFinalizerHandler func(context.Context, *JobExecutor) error
 
 type JobFinalizer struct {
 	Container corev1.Container
@@ -488,15 +491,17 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 				}
 			}
 			if finalizerExecutor != nil {
+				// Re-create the context to ensure that the shutdown process is executed.
+				ctx := context.Background()
 				if finalizer.Handler != nil {
-					if err := finalizer.Handler(finalizerExecutor); err != nil {
+					if err := finalizer.Handler(ctx, finalizerExecutor); err != nil {
 						j.logWarn("failed to finalize: %s", err)
 					}
 					if err := finalizerExecutor.Stop(); err != nil {
 						j.logWarn("failed to stop finalizer: %w", err)
 					}
 				} else {
-					if _, err := finalizerExecutor.Exec(); err != nil {
+					if _, err := finalizerExecutor.Exec(ctx); err != nil {
 						j.logWarn("failed to finalize: %s", err)
 					}
 				}
@@ -505,7 +510,7 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 				cancelFn()
 			}
 		}()
-		if err := handler(executors); err != nil {
+		if err := handler(ctx, executors); err != nil {
 			return err
 		}
 		return nil
@@ -539,6 +544,14 @@ func (j *Job) containerToJobExecutor(idx int, container *corev1.Container) (*Job
 	} else {
 		replaceCommandByJobTemplate(container)
 	}
+	container.Env = append(container.Env, corev1.EnvVar{
+		Name:  jobOriginalCommandEnvName,
+		Value: strings.Join(command, " "),
+	})
+	container.Env = append(container.Env, corev1.EnvVar{
+		Name:  jobOriginalCommandArgsEnvName,
+		Value: strings.Join(args, " "),
+	})
 	return &JobExecutor{
 		Container:    orgContainer,
 		ContainerIdx: idx,

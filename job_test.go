@@ -246,9 +246,9 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 					}
 					job.UseAgent(agentConfig)
 				}
-				if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+				if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 					for _, exec := range executors {
-						out, err := exec.Exec()
+						out, err := exec.Exec(ctx)
 						if err != nil {
 							t.Fatalf("%s: %+v", string(out), err)
 						}
@@ -293,9 +293,9 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 					}
 					job.UseAgent(agentConfig)
 				}
-				if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+				if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 					for _, exec := range executors {
-						out, err := exec.Exec()
+						out, err := exec.Exec(ctx)
 						if err == nil {
 							t.Fatal("expect error")
 						}
@@ -348,7 +348,7 @@ func Test_RunnerWithExecutionHandler(t *testing.T) {
 					t.Fatalf("failed to build job: %+v", err)
 				}
 				job.SetLogLevel(kubejob.LogLevelDebug)
-				if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+				if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 					for _, exec := range executors {
 						out, err := exec.ExecWithPodNotFoundError()
 						if err == nil {
@@ -429,9 +429,9 @@ func Test_RunnerWithInitContainers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to build job: %+v", err)
 	}
-	if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+	if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 		for _, exec := range executors {
-			out, err := exec.Exec()
+			out, err := exec.Exec(ctx)
 			if err != nil {
 				t.Fatalf("%s: %+v", string(out), err)
 			}
@@ -505,13 +505,13 @@ func Test_RunnerWithPreInit(t *testing.T) {
 				MountPath: "/tmp/mnt",
 			},
 		},
-	}, func(exec *kubejob.JobExecutor) error {
-		_, err := exec.Exec()
+	}, func(ctx context.Context, exec *kubejob.JobExecutor) error {
+		_, err := exec.Exec(ctx)
 		return err
 	})
-	if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+	if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 		for _, exec := range executors {
-			out, err := exec.Exec()
+			out, err := exec.Exec(ctx)
 			if err != nil {
 				t.Fatalf("%s: %+v", string(out), err)
 			}
@@ -596,19 +596,19 @@ func Test_RunnerWithInitExecutionHandler(t *testing.T) {
 				MountPath: "/tmp/mnt",
 			},
 		},
-	}, func(exec *kubejob.JobExecutor) error {
-		_, err := exec.Exec()
+	}, func(ctx context.Context, exec *kubejob.JobExecutor) error {
+		_, err := exec.Exec(ctx)
 		return err
 	})
 	var calledInitNum int
-	job.SetInitContainerExecutionHandler(func(exec *kubejob.JobExecutor) error {
+	job.SetInitContainerExecutionHandler(func(ctx context.Context, exec *kubejob.JobExecutor) error {
 		calledInitNum++
-		_, err := exec.Exec()
+		_, err := exec.Exec(ctx)
 		return err
 	})
-	if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+	if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 		for _, exec := range executors {
-			out, err := exec.Exec()
+			out, err := exec.Exec(ctx)
 			if err != nil {
 				t.Fatalf("%s: %+v", string(out), err)
 			}
@@ -629,7 +629,7 @@ func Test_RunnerWithSideCar(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: "kubejob",
+				GenerateName: "kubejob-",
 			},
 			Spec: batchv1.JobSpec{
 				Template: apiv1.PodTemplateSpec{
@@ -653,12 +653,12 @@ func Test_RunnerWithSideCar(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to build job: %+v", err)
 		}
-		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+		if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 			for _, exec := range executors {
 				if exec.Container.Name == "sidecar" {
-					exec.ExecAsync()
+					exec.ExecAsync(ctx)
 				} else {
-					out, err := exec.Exec()
+					out, err := exec.Exec(ctx)
 					if err != nil {
 						t.Fatalf("%s: %+v", string(out), err)
 					}
@@ -672,8 +672,8 @@ func Test_RunnerWithSideCar(t *testing.T) {
 				Image:   goImageName,
 				Command: []string{"echo", "finalizer"},
 			},
-			Handler: func(exec *kubejob.JobExecutor) error {
-				out, err := exec.ExecOnly()
+			Handler: func(ctx context.Context, exec *kubejob.JobExecutor) error {
+				out, err := exec.ExecOnly(ctx)
 				if err != nil {
 					t.Fatalf("%s: %+v", string(out), err)
 				}
@@ -713,12 +713,12 @@ func Test_RunnerWithSideCar(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to build job: %+v", err)
 		}
-		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+		if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 			for _, exec := range executors {
 				if exec.Container.Name == "sidecar" {
-					exec.ExecAsync()
+					exec.ExecAsync(ctx)
 				} else {
-					out, err := exec.Exec()
+					out, err := exec.Exec(ctx)
 					if err == nil {
 						t.Fatal("expect error")
 					}
@@ -742,6 +742,76 @@ func Test_RunnerWithSideCar(t *testing.T) {
 			t.Fatal("expect error")
 		}
 	})
+	t.Run("cancel", func(t *testing.T) {
+		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob",
+			},
+			Spec: batchv1.JobSpec{
+				Template: apiv1.PodTemplateSpec{
+					Spec: apiv1.PodSpec{
+						Containers: []apiv1.Container{
+							{
+								Name:    "main",
+								Image:   goImageName,
+								Command: []string{"sleep", "600"},
+							},
+							{
+								Name:    "sidecar",
+								Image:   "nginx:latest",
+								Command: []string{"nginx"},
+							},
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to build job: %+v", err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var calledFinalizer bool
+		if err := job.RunWithExecutionHandler(ctx, func(ctx context.Context, executors []*kubejob.JobExecutor) error {
+			cancel()
+			for _, exec := range executors {
+				if exec.Container.Name == "sidecar" {
+					exec.ExecAsync(ctx)
+				} else {
+					out, err := exec.Exec(ctx)
+					if err != nil {
+						t.Fatalf("%s: %+v", string(out), err)
+					}
+					t.Log(string(out))
+				}
+			}
+			return nil
+		}, &kubejob.JobFinalizer{
+			Container: corev1.Container{
+				Name:    "finalizer",
+				Image:   goImageName,
+				Command: []string{"echo", "finalizer"},
+			},
+			Handler: func(ctx context.Context, exec *kubejob.JobExecutor) error {
+				out, err := exec.ExecOnly(ctx)
+				if err != nil {
+					t.Fatalf("%s: %+v", string(out), err)
+				}
+				if string(out) != "finalizer\n" {
+					t.Fatalf("failed to get output from finalizer: %q", string(out))
+				}
+				calledFinalizer = true
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("failed to run: %+v", err)
+		}
+		if !calledFinalizer {
+			t.Fatal("couldn't call finalizer")
+		}
+	})
+
 }
 
 func Test_RunnerWithCancel(t *testing.T) {
@@ -767,7 +837,7 @@ func Test_RunnerWithCancel(t *testing.T) {
 		t.Fatalf("failed to build job: %+v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := job.RunWithExecutionHandler(ctx, func(executors []*kubejob.JobExecutor) error {
+	if err := job.RunWithExecutionHandler(ctx, func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 		cancel()
 		return nil
 	}, nil); err != nil {
@@ -845,14 +915,14 @@ func Test_RunnerWithAgent(t *testing.T) {
 				MountPath: "/tmp/mnt",
 			},
 		},
-	}, func(exec *kubejob.JobExecutor) error {
-		_, err := exec.Exec()
+	}, func(ctx context.Context, exec *kubejob.JobExecutor) error {
+		_, err := exec.Exec(ctx)
 		return err
 	})
 	job.UseAgent(agentConfig)
-	if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+	if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 		for _, exec := range executors {
-			out, err := exec.Exec()
+			out, err := exec.Exec(ctx)
 			if err != nil {
 				t.Fatalf("%s: %+v", string(out), err)
 			}
@@ -903,14 +973,14 @@ ln -s /tmp/symfile /tmp/artifacts/symfile
 		if err != nil {
 			t.Fatalf("failed to build job: %+v", err)
 		}
-		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+		if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 			if len(executors) != 1 {
 				return fmt.Errorf("invalid executor num. expected 1 but got %d", len(executors))
 			}
-			if _, err := executors[0].ExecOnly(); err != nil {
+			if _, err := executors[0].ExecOnly(ctx); err != nil {
 				return fmt.Errorf("failed to execute command: %w", err)
 			}
-			if err := executors[0].CopyFromPod(
+			if err := executors[0].CopyFromPod(ctx,
 				filepath.Join("/", "tmp", "artifacts"),
 				filepath.Join(dir, "artifacts"),
 			); err != nil {
@@ -972,17 +1042,17 @@ ln -s /tmp/symfile /tmp/artifacts/symfile
 		if err != nil {
 			t.Fatalf("failed to build job: %+v", err)
 		}
-		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+		if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 			if len(executors) != 1 {
 				return fmt.Errorf("invalid executor num. expected 1 but got %d", len(executors))
 			}
-			if err := executors[0].CopyToPod(
+			if err := executors[0].CopyToPod(ctx,
 				artifactsDir,
 				filepath.Join("/", "tmp"),
 			); err != nil {
 				return fmt.Errorf("failed to copy: %w", err)
 			}
-			out, err := executors[0].Exec()
+			out, err := executors[0].Exec(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to execute command: %w", err)
 			}
@@ -1038,14 +1108,14 @@ echo -n "hello" > /tmp/artifact.txt
 			t.Fatalf("failed to build job: %+v", err)
 		}
 		job.UseAgent(agentConfig)
-		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+		if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 			if len(executors) != 1 {
 				return fmt.Errorf("invalid executor num. expected 1 but got %d", len(executors))
 			}
-			if _, err := executors[0].ExecOnly(); err != nil {
+			if _, err := executors[0].ExecOnly(ctx); err != nil {
 				return fmt.Errorf("failed to execute command: %w", err)
 			}
-			if err := executors[0].CopyFromPod(
+			if err := executors[0].CopyFromPod(ctx,
 				filepath.Join("/", "tmp", "artifact.txt"),
 				filepath.Join(dir, "artifact.txt"),
 			); err != nil {
@@ -1097,17 +1167,17 @@ echo -n "hello" > /tmp/artifact.txt
 			t.Fatalf("failed to build job: %+v", err)
 		}
 		job.UseAgent(agentConfig)
-		if err := job.RunWithExecutionHandler(context.Background(), func(executors []*kubejob.JobExecutor) error {
+		if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
 			if len(executors) != 1 {
 				return fmt.Errorf("invalid executor num. expected 1 but got %d", len(executors))
 			}
-			if err := executors[0].CopyToPod(
+			if err := executors[0].CopyToPod(ctx,
 				file,
 				filepath.Join("/", "tmp", "artifact.txt"),
 			); err != nil {
 				return fmt.Errorf("failed to copy: %w", err)
 			}
-			out, err := executors[0].Exec()
+			out, err := executors[0].Exec(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to execute command: %w", err)
 			}
