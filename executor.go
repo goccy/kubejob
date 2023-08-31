@@ -422,23 +422,6 @@ type JobFinalizer struct {
 // However, if kubejob itself does not delete Pods, the forced termination process cannot be executed either.
 // Therefore, by specifying the finalizer container, you can explicitly terminate the injected container.
 func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionHandler, finalizer *JobFinalizer) error {
-	childCtx, cancel := context.WithCancel(ctx)
-	errCh := make(chan error)
-	go func() {
-		errCh <- j.runWithExecutionHandler(childCtx, cancel, handler, finalizer)
-	}()
-	select {
-	case <-ctx.Done():
-		// stop runWithExecutionHandler safely.
-		cancel()
-		return <-errCh
-	case err := <-errCh:
-		return err
-	}
-	return nil
-}
-
-func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), handler JobExecutionHandler, finalizer *JobFinalizer) error {
 	executorMap := map[string]*JobExecutor{}
 	for idx := range j.Job.Spec.Template.Spec.Containers {
 		executor, err := j.containerToJobExecutor(idx, &j.Job.Spec.Template.Spec.Containers[idx])
@@ -461,7 +444,6 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 	var callbackPod *corev1.Pod
 	j.podRunningCallback = func(pod *corev1.Pod) error {
 		callbackPod = pod
-		forceStop := false
 		executors := []*JobExecutor{}
 		for _, container := range pod.Spec.Containers {
 			if executor, exists := executorMap[container.Name]; exists {
@@ -471,8 +453,7 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 				executors = append(executors, executor)
 			} else {
 				// found injected container.
-				// Since kubejob cannot handle termination of this container, use forceStop logic
-				forceStop = true
+				// Since kubejob cannot handle termination of this container, needs to use finalizer.
 			}
 		}
 		if finalizerExecutor != nil {
@@ -487,7 +468,6 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 				}
 				if err := executor.Stop(); err != nil {
 					j.logWarn("failed to stop %s", err)
-					forceStop = true
 				}
 			}
 			if finalizerExecutor != nil {
@@ -505,9 +485,6 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 						j.logWarn("failed to finalize: %s", err)
 					}
 				}
-			}
-			if forceStop {
-				cancelFn()
 			}
 		}()
 		if err := handler(ctx, executors); err != nil {
