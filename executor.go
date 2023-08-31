@@ -492,6 +492,9 @@ func (j *Job) runWithExecutionHandler(ctx context.Context, cancelFn func(), hand
 					if err := finalizer.Handler(finalizerExecutor); err != nil {
 						j.logWarn("failed to finalize: %s", err)
 					}
+					if err := finalizerExecutor.Stop(); err != nil {
+						j.logWarn("failed to stop finalizer: %w", err)
+					}
 				} else {
 					if _, err := finalizerExecutor.Exec(); err != nil {
 						j.logWarn("failed to finalize: %s", err)

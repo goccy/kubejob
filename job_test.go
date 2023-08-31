@@ -673,7 +673,7 @@ func Test_RunnerWithSideCar(t *testing.T) {
 				Command: []string{"echo", "finalizer"},
 			},
 			Handler: func(exec *kubejob.JobExecutor) error {
-				out, err := exec.Exec()
+				out, err := exec.ExecOnly()
 				if err != nil {
 					t.Fatalf("%s: %+v", string(out), err)
 				}
