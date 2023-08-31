@@ -846,94 +846,167 @@ func Test_RunnerWithCancel(t *testing.T) {
 }
 
 func Test_RunnerWithAgent(t *testing.T) {
-	job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "kubejob-",
-		},
-		Spec: batchv1.JobSpec{
-			Template: apiv1.PodTemplateSpec{
-				Spec: apiv1.PodSpec{
-					InitContainers: []apiv1.Container{
-						{
-							Name:            "after-preinit",
-							Image:           "kubejob:latest",
-							ImagePullPolicy: "Never",
-							Command:         []string{"cat", "/tmp/mnt/hello.txt"},
-							VolumeMounts: []apiv1.VolumeMount{
-								{
-									Name:      "shared",
-									MountPath: "/tmp/mnt",
+	t.Run("success", func(t *testing.T) {
+		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
+			Spec: batchv1.JobSpec{
+				Template: apiv1.PodTemplateSpec{
+					Spec: apiv1.PodSpec{
+						InitContainers: []apiv1.Container{
+							{
+								Name:            "after-preinit",
+								Image:           "kubejob:latest",
+								ImagePullPolicy: "Never",
+								Command:         []string{"cat", "/tmp/mnt/hello.txt"},
+								VolumeMounts: []apiv1.VolumeMount{
+									{
+										Name:      "shared",
+										MountPath: "/tmp/mnt",
+									},
 								},
 							},
 						},
-					},
-					Containers: []apiv1.Container{
-						{
-							Name:            "after-init",
-							Image:           "kubejob:latest",
-							ImagePullPolicy: "Never",
-							Command:         []string{"cat", "/tmp/mnt/hello.txt"},
-							VolumeMounts: []apiv1.VolumeMount{
-								{
-									Name:      "shared",
-									MountPath: "/tmp/mnt",
+						Containers: []apiv1.Container{
+							{
+								Name:            "after-init",
+								Image:           "kubejob:latest",
+								ImagePullPolicy: "Never",
+								Command:         []string{"cat", "/tmp/mnt/hello.txt"},
+								VolumeMounts: []apiv1.VolumeMount{
+									{
+										Name:      "shared",
+										MountPath: "/tmp/mnt",
+									},
 								},
 							},
 						},
-					},
-					Volumes: []apiv1.Volume{
-						{
-							Name: "shared",
-							VolumeSource: apiv1.VolumeSource{
-								EmptyDir: &apiv1.EmptyDirVolumeSource{},
+						Volumes: []apiv1.Volume{
+							{
+								Name: "shared",
+								VolumeSource: apiv1.VolumeSource{
+									EmptyDir: &apiv1.EmptyDirVolumeSource{},
+								},
 							},
 						},
 					},
 				},
 			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("failed to build job: %+v", err)
-	}
-	agentConfig, err := kubejob.NewAgentConfig(map[string]string{
-		"preinit": filepath.Join("/", "bin", "kubejob-agent"),
-		"test":    filepath.Join("/", "bin", "kubejob-agent"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	job.PreInit(apiv1.Container{
-		Name:            "preinit",
-		Image:           "kubejob:latest",
-		ImagePullPolicy: "Never",
-		Command:         []string{"sh", "-c"},
-		Args:            []string{`echo -n "hello" > /tmp/mnt/hello.txt`},
-		VolumeMounts: []apiv1.VolumeMount{
-			{
-				Name:      "shared",
-				MountPath: "/tmp/mnt",
-			},
-		},
-	}, func(ctx context.Context, exec *kubejob.JobExecutor) error {
-		_, err := exec.Exec(ctx)
-		return err
-	})
-	job.UseAgent(agentConfig)
-	if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
-		for _, exec := range executors {
-			out, err := exec.Exec(ctx)
-			if err != nil {
-				t.Fatalf("%s: %+v", string(out), err)
-			}
-			if string(out) != "hello" {
-				t.Fatalf("cannot get output %q", string(out))
-			}
+		})
+		if err != nil {
+			t.Fatalf("failed to build job: %+v", err)
 		}
-		return nil
-	}, nil); err != nil {
-		t.Fatalf("failed to run: %+v", err)
-	}
+		agentConfig, err := kubejob.NewAgentConfig(map[string]string{
+			"preinit": filepath.Join("/", "bin", "kubejob-agent"),
+			"test":    filepath.Join("/", "bin", "kubejob-agent"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		job.PreInit(apiv1.Container{
+			Name:            "preinit",
+			Image:           "kubejob:latest",
+			ImagePullPolicy: "Never",
+			Command:         []string{"sh", "-c"},
+			Args:            []string{`echo -n "hello" > /tmp/mnt/hello.txt`},
+			VolumeMounts: []apiv1.VolumeMount{
+				{
+					Name:      "shared",
+					MountPath: "/tmp/mnt",
+				},
+			},
+		}, func(ctx context.Context, exec *kubejob.JobExecutor) error {
+			_, err := exec.Exec(ctx)
+			return err
+		})
+		job.UseAgent(agentConfig)
+		if err := job.RunWithExecutionHandler(context.Background(), func(ctx context.Context, executors []*kubejob.JobExecutor) error {
+			for _, exec := range executors {
+				out, err := exec.Exec(ctx)
+				if err != nil {
+					t.Fatalf("%s: %+v", string(out), err)
+				}
+				if string(out) != "hello" {
+					t.Fatalf("cannot get output %q", string(out))
+				}
+			}
+			return nil
+		}, nil); err != nil {
+			t.Fatalf("failed to run: %+v", err)
+		}
+	})
+	t.Run("cancel", func(t *testing.T) {
+		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "kubejob-",
+			},
+			Spec: batchv1.JobSpec{
+				Template: apiv1.PodTemplateSpec{
+					Spec: apiv1.PodSpec{
+						Containers: []apiv1.Container{
+							{
+								Name:            "test",
+								Image:           "kubejob:latest",
+								ImagePullPolicy: "Never",
+								Command:         []string{"sleep", "600"},
+							},
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to build job: %+v", err)
+		}
+		agentConfig, err := kubejob.NewAgentConfig(map[string]string{
+			"test":      filepath.Join("/", "bin", "kubejob-agent"),
+			"finalizer": filepath.Join("/", "bin", "kubejob-agent"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		job.UseAgent(agentConfig)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var calledFinalizer bool
+		if err := job.RunWithExecutionHandler(ctx, func(ctx context.Context, executors []*kubejob.JobExecutor) error {
+			cancel()
+			for _, exec := range executors {
+				out, err := exec.Exec(ctx)
+				if err != nil {
+					t.Fatalf("%s: %+v", string(out), err)
+				}
+			}
+			return nil
+		}, &kubejob.JobFinalizer{
+			Container: corev1.Container{
+				Name:            "finalizer",
+				Image:           "kubejob:latest",
+				ImagePullPolicy: "Never",
+				Command:         []string{"echo", "finalizer"},
+			},
+			Handler: func(ctx context.Context, exec *kubejob.JobExecutor) error {
+				out, err := exec.ExecOnly(ctx)
+				if err != nil {
+					t.Fatalf("%s: %+v", string(out), err)
+				}
+				if string(out) != "finalizer\n" {
+					t.Fatalf("failed to get output from finalizer: %q", string(out))
+				}
+				calledFinalizer = true
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("failed to run: %+v", err)
+		}
+		if !calledFinalizer {
+			t.Fatal("couldn't call finalizer")
+		}
+	})
+
 }
 
 func Test_Copy(t *testing.T) {
