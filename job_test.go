@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/goccy/kubejob"
 	batchv1 "k8s.io/api/batch/v1"
@@ -896,6 +897,7 @@ func Test_RunnerWithAgent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		agentConfig.SetTimeout(1 * time.Minute)
 		job.UseAgent(agentConfig)
 
 		ctx, cancel := context.WithCancel(context.Background())

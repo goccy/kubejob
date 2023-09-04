@@ -520,7 +520,7 @@ func (j *Job) containerToJobExecutor(idx int, container *corev1.Container) (*Job
 			return nil, fmt.Errorf("failed to allocate a new port for agent: %w", err)
 		}
 		agentPort = port
-		replaceCommandByAgentCommand(container, j.agentCfg.InstalledPath(container.Name), port)
+		replaceCommandByAgentCommand(container, j.agentCfg.InstalledPath(container.Name), port, j.agentCfg.Timeout())
 		container.Env = append(container.Env, j.agentCfg.PublicKeyEnv())
 	} else {
 		replaceCommandByJobTemplate(container)

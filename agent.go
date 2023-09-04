@@ -36,6 +36,7 @@ type AgentConfig struct {
 	portMapMu                       sync.RWMutex
 	privateKey                      *rsa.PrivateKey
 	publicKeyPEM                    string
+	timeout                         *time.Duration
 }
 
 func NewAgentConfig(containerNameToInstalledPathMap map[string]string) (*AgentConfig, error) {
@@ -59,6 +60,17 @@ func NewAgentConfig(containerNameToInstalledPathMap map[string]string) (*AgentCo
 func (c *AgentConfig) Enabled(containerName string) bool {
 	path, exists := c.containerNameToInstalledPathMap[containerName]
 	return exists && path != ""
+}
+
+func (c *AgentConfig) SetTimeout(timeout time.Duration) {
+	c.timeout = &timeout
+}
+
+func (c *AgentConfig) Timeout() string {
+	if c.timeout == nil {
+		return ""
+	}
+	return c.timeout.String()
 }
 
 func (c *AgentConfig) InstalledPath(containerName string) string {
