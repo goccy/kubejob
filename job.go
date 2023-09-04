@@ -240,10 +240,7 @@ func (j *Job) wait(ctx context.Context) error {
 	if j.watchTimeoutSecond != nil {
 		listOptions.TimeoutSeconds = j.watchTimeoutSecond
 	}
-	watcher, err := j.podClient.Watch(ctx, metav1.ListOptions{
-		LabelSelector: j.labelSelector(),
-		Watch:         true,
-	})
+	watcher, err := j.podClient.Watch(ctx, listOptions)
 	if err != nil {
 		return errJobWatch(j.Name, err)
 	}
