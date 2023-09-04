@@ -4,18 +4,44 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/goccy/kubejob"
 	"github.com/jessevdk/go-flags"
 )
 
 type option struct {
-	Port uint16 `description:"specify listening port" long:"port" required:"true"`
+	Port    uint16 `description:"specify listening port" long:"port" required:"true"`
+	Timeout string `description:"specify timeout by Go's time.Duration format. see details: https://pkg.go.dev/time#ParseDuration" long:"timeout"`
+}
+
+func (o option) getTimeout() (time.Duration, error) {
+	if o.Timeout == "" {
+		return 0, nil
+	}
+	return time.ParseDuration(o.Timeout)
 }
 
 func _main(args []string, opt option) error {
-	agentServer := kubejob.NewAgentServer(opt.Port)
-	return agentServer.Run(context.Background())
+	timeout, err := opt.getTimeout()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	if timeout != 0 {
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer func() {
+			fmt.Fprintf(os.Stderr, "kubejob-agent: timeout (%s): %s\n", opt.Timeout, err.Error())
+			cancel()
+		}()
+		return runAgentServer(ctx, opt.Port)
+	}
+	return runAgentServer(ctx, opt.Port)
+}
+
+func runAgentServer(ctx context.Context, port uint16) error {
+	agentServer := kubejob.NewAgentServer(port)
+	return agentServer.Run(ctx)
 }
 
 func parseOpt() ([]string, option, error) {
@@ -44,7 +70,7 @@ func main() {
 		os.Exit(exitFailure)
 	}
 	if err := _main(args, opt); err != nil {
-		fmt.Fprintf(os.Stderr, "kubejob-agent: %+v", err)
+		fmt.Fprintf(os.Stderr, "kubejob-agent: %+v\n", err)
 		os.Exit(exitFailure)
 	}
 	os.Exit(exitSuccess)

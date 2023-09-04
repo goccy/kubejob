@@ -54,6 +54,15 @@ func TestAgentServer(t *testing.T) {
 		}
 	}()
 	signedToken := string(token)
+	t.Run("cancel", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		agentServer := kubejob.NewAgentServer(startAllocationPort)
+		if err := agentServer.Run(ctx); err == nil {
+			t.Fatal("expected cancel error")
+		}
+	})
 	t.Run("finish", func(t *testing.T) {
 		agentServer := kubejob.NewAgentServer(startAllocationPort)
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
