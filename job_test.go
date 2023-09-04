@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/goccy/kubejob"
 	batchv1 "k8s.io/api/batch/v1"
@@ -742,76 +743,6 @@ func Test_RunnerWithSideCar(t *testing.T) {
 			t.Fatal("expect error")
 		}
 	})
-	t.Run("cancel", func(t *testing.T) {
-		job, err := kubejob.NewJobBuilder(cfg, "default").BuildWithJob(&batchv1.Job{
-			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: "kubejob",
-			},
-			Spec: batchv1.JobSpec{
-				Template: apiv1.PodTemplateSpec{
-					Spec: apiv1.PodSpec{
-						Containers: []apiv1.Container{
-							{
-								Name:    "main",
-								Image:   goImageName,
-								Command: []string{"sleep", "600"},
-							},
-							{
-								Name:    "sidecar",
-								Image:   "nginx:latest",
-								Command: []string{"nginx"},
-							},
-						},
-					},
-				},
-			},
-		})
-		if err != nil {
-			t.Fatalf("failed to build job: %+v", err)
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		var calledFinalizer bool
-		if err := job.RunWithExecutionHandler(ctx, func(ctx context.Context, executors []*kubejob.JobExecutor) error {
-			cancel()
-			for _, exec := range executors {
-				if exec.Container.Name == "sidecar" {
-					exec.ExecAsync(ctx)
-				} else {
-					out, err := exec.Exec(ctx)
-					if err != nil {
-						t.Fatalf("%s: %+v", string(out), err)
-					}
-					t.Log(string(out))
-				}
-			}
-			return nil
-		}, &kubejob.JobFinalizer{
-			Container: corev1.Container{
-				Name:    "finalizer",
-				Image:   goImageName,
-				Command: []string{"echo", "finalizer"},
-			},
-			Handler: func(ctx context.Context, exec *kubejob.JobExecutor) error {
-				out, err := exec.ExecOnly(ctx)
-				if err != nil {
-					t.Fatalf("%s: %+v", string(out), err)
-				}
-				if string(out) != "finalizer\n" {
-					t.Fatalf("failed to get output from finalizer: %q", string(out))
-				}
-				calledFinalizer = true
-				return nil
-			},
-		}); err != nil {
-			t.Fatalf("failed to run: %+v", err)
-		}
-		if !calledFinalizer {
-			t.Fatal("couldn't call finalizer")
-		}
-	})
-
 }
 
 func Test_RunnerWithCancel(t *testing.T) {
@@ -966,6 +897,7 @@ func Test_RunnerWithAgent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		agentConfig.SetTimeout(1 * time.Minute)
 		job.UseAgent(agentConfig)
 
 		ctx, cancel := context.WithCancel(context.Background())

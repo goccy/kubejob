@@ -24,7 +24,7 @@ const (
 func jobTemplateCommandContainer(c corev1.Container, agentCfg *AgentConfig, agentPort uint16) corev1.Container {
 	copied := c.DeepCopy()
 	if agentCfg != nil && agentCfg.Enabled(c.Name) {
-		replaceCommandByAgentCommand(copied, agentCfg.InstalledPath(c.Name), agentPort)
+		replaceCommandByAgentCommand(copied, agentCfg.InstalledPath(c.Name), agentPort, agentCfg.Timeout())
 	} else {
 		replaceCommandByJobTemplate(copied)
 	}
@@ -39,10 +39,13 @@ func jobTemplateCommandContainer(c corev1.Container, agentCfg *AgentConfig, agen
 	return *copied
 }
 
-func replaceCommandByAgentCommand(c *corev1.Container, path string, port uint16) {
+func replaceCommandByAgentCommand(c *corev1.Container, path string, port uint16, timeout string) {
 	c.Command = []string{path}
 	c.Args = []string{
 		"--port", fmt.Sprint(port),
+	}
+	if timeout != "" {
+		c.Args = append(c.Args, "--timeout", timeout)
 	}
 }
 

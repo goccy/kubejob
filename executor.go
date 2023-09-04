@@ -492,7 +492,11 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 		}
 		return nil
 	}
-	if err := j.Run(ctx); err != nil {
+
+	// Create a new context.
+	// If cancel is set, it is passed to the ExecutionHandler after the pod is Running.
+	// Create a new context so that it does not exit before that time.
+	if err := j.Run(context.Background()); err != nil {
 		return err
 	}
 
@@ -516,7 +520,7 @@ func (j *Job) containerToJobExecutor(idx int, container *corev1.Container) (*Job
 			return nil, fmt.Errorf("failed to allocate a new port for agent: %w", err)
 		}
 		agentPort = port
-		replaceCommandByAgentCommand(container, j.agentCfg.InstalledPath(container.Name), port)
+		replaceCommandByAgentCommand(container, j.agentCfg.InstalledPath(container.Name), port, j.agentCfg.Timeout())
 		container.Env = append(container.Env, j.agentCfg.PublicKeyEnv())
 	} else {
 		replaceCommandByJobTemplate(container)
