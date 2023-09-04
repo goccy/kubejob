@@ -492,7 +492,11 @@ func (j *Job) RunWithExecutionHandler(ctx context.Context, handler JobExecutionH
 		}
 		return nil
 	}
-	if err := j.Run(ctx); err != nil {
+
+	// Create a new context.
+	// If cancel is set, it is passed to the ExecutionHandler after the pod is Running.
+	// Create a new context so that it does not exit before that time.
+	if err := j.Run(context.Background()); err != nil {
 		return err
 	}
 

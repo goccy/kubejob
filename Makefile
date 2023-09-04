@@ -24,7 +24,7 @@ cluster/create: tools
 	fi ;\
 	}
 
-cluster/delete: kind/install
+cluster/delete:
 	$(GOBIN)/kind delete clusters $(CLUSTER_NAME)
 
 .PHONY: deploy
