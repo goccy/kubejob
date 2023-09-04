@@ -209,6 +209,7 @@ func (s *AgentServer) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 	case <-ctx.Done():
+		server.Stop()
 		return ctx.Err()
 	}
 }
