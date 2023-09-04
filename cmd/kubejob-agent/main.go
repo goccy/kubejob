@@ -31,7 +31,7 @@ func _main(args []string, opt option) error {
 	if timeout != 0 {
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer func() {
-			fmt.Fprintf(os.Stderr, "kubejob-agent: timeout (%s): %s\n", opt.Timeout, err.Error())
+			fmt.Fprintf(os.Stderr, "kubejob-agent: timeout (%s)\n", opt.Timeout)
 			cancel()
 		}()
 		return runAgentServer(ctx, opt.Port)
