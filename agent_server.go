@@ -199,16 +199,16 @@ func (s *AgentServer) Run(ctx context.Context) error {
 
 	select {
 	case <-s.stopCh:
-		log.Println("stop agent gracefully")
-		server.GracefulStop()
+		log.Println("stop agent")
+		server.Stop()
 		select {
 		case <-done:
-			log.Println("stopped agent successfully")
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	case <-ctx.Done():
+		log.Println("stop agent")
 		server.Stop()
 		return ctx.Err()
 	}
