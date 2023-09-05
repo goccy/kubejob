@@ -64,7 +64,7 @@ func TestAgentServer(t *testing.T) {
 		}
 	})
 	t.Run("finish", func(t *testing.T) {
-		agentServer := kubejob.NewAgentServer(startAllocationPort)
+		agentServer := kubejob.NewAgentServer(startAllocationPort + 1)
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
@@ -90,7 +90,7 @@ func TestAgentServer(t *testing.T) {
 		}
 	})
 	t.Run("timeout", func(t *testing.T) {
-		agentServer := kubejob.NewAgentServer(startAllocationPort)
+		agentServer := kubejob.NewAgentServer(startAllocationPort + 2)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
@@ -124,7 +124,7 @@ func TestAgentServer(t *testing.T) {
 	})
 
 	t.Run("exec", func(t *testing.T) {
-		agentServer := kubejob.NewAgentServer(startAllocationPort)
+		agentServer := kubejob.NewAgentServer(startAllocationPort + 3)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
