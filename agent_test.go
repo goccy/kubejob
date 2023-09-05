@@ -18,12 +18,12 @@ import (
 )
 
 const (
-	startAllocationPort = 5000
+	startAllocationPort = uint16(5000)
 )
 
-func createGRPCConn(t *testing.T, signedToken string) grpc.ClientConnInterface {
+func createGRPCConn(t *testing.T, signedToken string, port uint16) grpc.ClientConnInterface {
 	t.Helper()
-	conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", startAllocationPort),
+	conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", port),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithUnaryInterceptor(kubejob.AgentAuthUnaryInterceptor(signedToken)),
@@ -64,33 +64,70 @@ func TestAgentServer(t *testing.T) {
 		}
 	})
 	t.Run("finish", func(t *testing.T) {
-		agentServer := kubejob.NewAgentServer(startAllocationPort)
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		port := startAllocationPort + 1
+		agentServer := kubejob.NewAgentServer(port)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		done := make(chan struct{})
+		done := make(chan error)
 
 		go func() {
-			if err := agentServer.Run(ctx); err != nil {
-				t.Fatal(err)
-			}
-			done <- struct{}{}
+			done <- agentServer.Run(ctx)
 		}()
 
-		agentClient := agent.NewAgentClient(createGRPCConn(t, signedToken))
+		agentClient := agent.NewAgentClient(createGRPCConn(t, signedToken, port))
 		if _, err := agentClient.Finish(context.Background(), &agent.FinishRequest{}); err != nil {
 			t.Fatal(err)
 		}
 		select {
-		case <-done:
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
 		case <-ctx.Done():
 			if err := ctx.Err(); err != nil {
 				t.Fatal(err)
 			}
 		}
 	})
+	t.Run("timeout", func(t *testing.T) {
+		port := startAllocationPort + 2
+		agentServer := kubejob.NewAgentServer(port)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		done := make(chan struct{})
+
+		go func() {
+			if err := agentServer.Run(ctx); err == nil {
+				t.Fatal("expected timeout error")
+			}
+			done <- struct{}{}
+		}()
+
+		agentClient := agent.NewAgentClient(createGRPCConn(t, signedToken, port))
+		go func() {
+			if _, err := agentClient.Exec(context.Background(), &agent.ExecRequest{
+				Command: []string{"sleep", "60"},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}()
+		if _, err := agentClient.Finish(context.Background(), &agent.FinishRequest{}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			if err := ctx.Err(); err == nil {
+				t.Fatal("expected timeout error")
+			}
+		}
+	})
+
 	t.Run("exec", func(t *testing.T) {
-		agentServer := kubejob.NewAgentServer(startAllocationPort)
+		port := startAllocationPort + 3
+		agentServer := kubejob.NewAgentServer(port)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
@@ -103,7 +140,7 @@ func TestAgentServer(t *testing.T) {
 			done <- struct{}{}
 		}()
 
-		agentClient := agent.NewAgentClient(createGRPCConn(t, signedToken))
+		agentClient := agent.NewAgentClient(createGRPCConn(t, signedToken, port))
 
 		for _, test := range []struct {
 			name             string
