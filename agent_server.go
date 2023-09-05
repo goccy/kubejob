@@ -45,7 +45,7 @@ func (s *AgentServer) Exec(ctx context.Context, req *agent.ExecRequest) (*agent.
 	log.Printf("exec command: %s", strings.Join(req.Command, " "))
 	var buf bytes.Buffer
 	w := io.MultiWriter(&buf, os.Stdout)
-	cmd := exec.Command(req.Command[0], req.Command[1:]...)
+	cmd := exec.CommandContext(ctx, req.Command[0], req.Command[1:]...)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	cmd.Env = env
@@ -176,6 +176,8 @@ func (s *AgentServer) Finish(ctx context.Context, req *agent.FinishRequest) (*ag
 	return &agent.FinishResponse{}, nil
 }
 
+const gracefulStopTimeout = 30 * time.Second
+
 func (s *AgentServer) Run(ctx context.Context) error {
 	listenPort, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
@@ -200,7 +202,7 @@ func (s *AgentServer) Run(ctx context.Context) error {
 	select {
 	case <-s.stopCh:
 		log.Println("stop agent gracefully")
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, gracefulStopTimeout)
 		defer cancel()
 
 		go server.GracefulStop()
