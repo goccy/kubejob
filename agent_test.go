@@ -89,6 +89,40 @@ func TestAgentServer(t *testing.T) {
 			}
 		}
 	})
+	t.Run("timeout", func(t *testing.T) {
+		agentServer := kubejob.NewAgentServer(startAllocationPort)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		done := make(chan struct{})
+
+		go func() {
+			if err := agentServer.Run(ctx); err == nil {
+				t.Fatal("expected timeout error")
+			}
+			done <- struct{}{}
+		}()
+
+		agentClient := agent.NewAgentClient(createGRPCConn(t, signedToken))
+		go func() {
+			if _, err := agentClient.Exec(context.Background(), &agent.ExecRequest{
+				Command: []string{"sleep", "60"},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}()
+		if _, err := agentClient.Finish(context.Background(), &agent.FinishRequest{}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			if err := ctx.Err(); err == nil {
+				t.Fatal("expected timeout error")
+			}
+		}
+	})
+
 	t.Run("exec", func(t *testing.T) {
 		agentServer := kubejob.NewAgentServer(startAllocationPort)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

@@ -199,12 +199,17 @@ func (s *AgentServer) Run(ctx context.Context) error {
 
 	select {
 	case <-s.stopCh:
-		log.Println("stop agent")
-		server.Stop()
+		log.Println("stop agent gracefully")
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		go server.GracefulStop()
+
 		select {
 		case <-done:
 			return nil
 		case <-ctx.Done():
+			log.Printf("timeout: %v", ctx.Err())
 			return ctx.Err()
 		}
 	case <-ctx.Done():
