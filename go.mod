@@ -6,7 +6,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/lestrrat-go/backoff v1.0.1
-	github.com/lestrrat-go/jwx/v2 v2.0.13
+	github.com/lestrrat-go/jwx/v2 v2.0.16
 	github.com/rs/xid v1.5.0
 	golang.org/x/sync v0.5.0
 	google.golang.org/grpc v1.59.0
