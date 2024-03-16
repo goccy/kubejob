@@ -5,7 +5,7 @@ go 1.21
 require (
 	github.com/bufbuild/buf v1.26.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.33.0
 	sigs.k8s.io/kind v0.20.0
 )
 
