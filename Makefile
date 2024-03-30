@@ -10,11 +10,10 @@ export GOBIN
 
 .PHONY: tools
 tools:
-	cd tools && GOFLAGS='-mod=readonly' go install \
-		sigs.k8s.io/kind \
-		github.com/bufbuild/buf/cmd/buf \
-		google.golang.org/protobuf/cmd/protoc-gen-go \
-		google.golang.org/grpc/cmd/protoc-gen-go-grpc
+	go install sigs.k8s.io/kind@v0.22.0
+	go install github.com/bufbuild/buf/cmd/buf@v1.30.0
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0
 
 cluster/create: tools
 	@{ \
