@@ -358,6 +358,7 @@ func TestAgentServer(t *testing.T) {
 			if err := agentClient.CopyFrom(ctx, srcDir, dstDir); err != nil {
 				t.Fatal(err)
 			}
+			validateTemporaryDirectory(t, filepath.Join(dstDir, filepath.Base(srcDir)))
 			if err := agentClient.Stop(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -514,6 +515,7 @@ func TestAgentServer(t *testing.T) {
 			if err := agentClient.CopyTo(ctx, srcDir, dstDir); err != nil {
 				t.Fatal(err)
 			}
+			validateTemporaryDirectory(t, filepath.Join(dstDir, filepath.Base(srcDir)))
 			if err := agentClient.Stop(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -547,12 +549,67 @@ func createTemporaryDirectory(t *testing.T) string {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		f, err := os.Create(filepath.Join(contentDir, fmt.Sprintf("%d.txt", i)))
+		fileName := fmt.Sprintf("%d.txt", i)
+		path := filepath.Join(contentDir, fileName)
+		f, err := os.Create(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		writeContent(t, f)
 		f.Close()
+		if err := os.Symlink(path, filepath.Join(contentDir, fmt.Sprintf("%s.sym", fileName))); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(path, filepath.Join(repoDir, fmt.Sprintf("%s.sym", fileName))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(contentDir, filepath.Join(repoDir, "content_sym")); err != nil {
+		t.Fatal(err)
 	}
 	return repoDir
+}
+
+func validateTemporaryDirectory(t *testing.T, extractedDir string) {
+	t.Helper()
+
+	contentInfo, err := os.Stat(filepath.Join(extractedDir, "content"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contentInfo.IsDir() {
+		t.Fatalf("failed to copy directory")
+	}
+
+	contentDirPath, err := os.Readlink(filepath.Join(extractedDir, "content_sym"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contentDirPath != filepath.Join(extractedDir, "content") {
+		t.Fatalf("failed to read symlink path: %s", contentDirPath)
+	}
+
+	for i := 0; i < 3; i++ {
+		fileName := fmt.Sprintf("%d.txt", i)
+		symlinkFileName := fmt.Sprintf("%s.sym", fileName)
+
+		filePath := filepath.Join(extractedDir, "content", fileName)
+		if _, err := os.Stat(filePath); err != nil {
+			t.Fatal(err)
+		}
+		p, err := os.Readlink(filepath.Join(extractedDir, "content", symlinkFileName))
+		if err != nil {
+			t.Fatalf("failed to read symlink: %v", err)
+		}
+		if p != filePath {
+			t.Fatalf("failed to read symlink path: %s", p)
+		}
+		p2, err := os.Readlink(filepath.Join(extractedDir, symlinkFileName))
+		if err != nil {
+			t.Fatalf("failed to read symlink: %v", err)
+		}
+		if p2 != filePath {
+			t.Fatalf("failed to read symlink path: %s", p)
+		}
+	}
 }
