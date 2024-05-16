@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	goImageName = "golang:1.21.0-bookworm"
+	goImageName = "golang:1.22.0-bookworm"
 )
 
 var (

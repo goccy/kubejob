@@ -70,7 +70,7 @@ spec:
       serviceAccountName: kubejob
       containers:
         - name: kubejob
-          image: golang:1.21.0-bookworm
+          image: golang:1.22.0-bookworm
           workingDir: /go/src/kubejob
           command:
             - tail
