@@ -85,6 +85,7 @@ func (s *AgentServer) copyFrom(req *agent.CopyFromRequest, stream agent.Agent_Co
 	if err != nil {
 		return err
 	}
+
 	f, err := os.Open(archivedFilePath)
 	if err != nil {
 		return fmt.Errorf("failed to open %s: %w", archivedFilePath, err)
@@ -125,19 +126,16 @@ func (s *AgentServer) CopyTo(stream agent.Agent_CopyToServer) error {
 		archivedFilePath = filepath.Join(path, fmt.Sprintf("%s.tar", filepath.Base(path)))
 	}
 	defer os.Remove(archivedFilePath)
-	copiedLength, err := s.copyTo(archivedFilePath, stream)
+	copiedLength, err := s.copyTo(archivedFilePath, path, stream)
 	if err != nil {
 		log.Printf("copied length %d", copiedLength)
 		log.Println(err)
 		return err
 	}
-	if err := extractArchivedFile(archivedFilePath, path); err != nil {
-		return fmt.Errorf("failed to extract archived file %s: %w", archivedFilePath, err)
-	}
 	return nil
 }
 
-func (s *AgentServer) copyTo(path string, stream agent.Agent_CopyToServer) (int64, error) {
+func (s *AgentServer) copyTo(path, outPath string, stream agent.Agent_CopyToServer) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return 0, fmt.Errorf("failed to create directory %s: %w", filepath.Dir(path), err)
 	}
@@ -161,6 +159,9 @@ func (s *AgentServer) copyTo(path string, stream agent.Agent_CopyToServer) (int6
 			return copiedLength, fmt.Errorf("failed to write data to file: %w", err)
 		}
 		copiedLength += int64(n)
+	}
+	if err := extractArchivedFile(path, outPath); err != nil {
+		return copiedLength, fmt.Errorf("failed to extract archived file %s: %w", path, err)
 	}
 	if err := stream.Send(&agent.CopyToResponse{CopiedLength: copiedLength}); err != nil {
 		return copiedLength, fmt.Errorf("failed to send CopyToResponse: %w", err)

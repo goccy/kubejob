@@ -7,8 +7,10 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -229,21 +231,52 @@ func archivePath(baseDir string, targetPath string) (string, error) {
 			return nil
 		}
 		name := path[len(pathToDir)+1:]
-		if err := tw.WriteHeader(&tar.Header{
-			Name:    name,
-			Mode:    int64(info.Mode()),
-			ModTime: info.ModTime(),
-			Size:    info.Size(),
-		}); err != nil {
-			return fmt.Errorf("failed to write archive header to create archive file: %w", err)
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return fmt.Errorf("failed to open local file to create archive file: %w", err)
-		}
-		defer f.Close()
-		if _, err := io.Copy(tw, f); err != nil {
-			return fmt.Errorf("failed to copy local file to archive file: %w", err)
+		switch {
+		case info.Mode()&os.ModeSymlink == os.ModeSymlink:
+			linkName, err := os.Readlink(path)
+			if err != nil {
+				return fmt.Errorf("failed to read symlink file: %s: %w", path, err)
+			}
+			hdr, err := tar.FileInfoHeader(info, linkName)
+			if err != nil {
+				return fmt.Errorf("failed to get header from symlink file name: %s: %w", linkName, err)
+			}
+			hdr.Name = name
+			if !strings.HasPrefix(linkName, pathToDir) {
+				log.Printf(
+					"WARN: %s symlink refer to %s, but it is not under the %s directory, so it couldn't copy to archive file",
+					path, linkName, targetPath,
+				)
+				return nil
+			}
+			relPath, err := filepath.Rel(filepath.Dir(path), linkName)
+			if err != nil {
+				return fmt.Errorf("failed to get relative path from %s to %s: %w", path, linkName, err)
+			}
+			if relPath != "" && relPath[0] != '.' {
+				relPath = "./" + relPath
+			}
+			hdr.Linkname = relPath
+			if err := tw.WriteHeader(hdr); err != nil {
+				return fmt.Errorf("failed to write symlink header: %w", err)
+			}
+		default:
+			if err := tw.WriteHeader(&tar.Header{
+				Name:    name,
+				Mode:    int64(info.Mode()),
+				ModTime: info.ModTime(),
+				Size:    info.Size(),
+			}); err != nil {
+				return fmt.Errorf("failed to write archive header to create archive file: %w", err)
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return fmt.Errorf("failed to open local file to create archive file: %w", err)
+			}
+			defer f.Close()
+			if _, err := io.Copy(tw, f); err != nil {
+				return fmt.Errorf("failed to copy local file to archive file: %w", err)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -268,20 +301,20 @@ func extractArchivedFile(filePath string, dstPath string) error {
 			}
 			return fmt.Errorf("failed to read archived file %s: %w", filePath, err)
 		}
-		path := filepath.Join(dstPath, header.Name)
 		if filepath.Join(baseDir, header.Name) == dstPath {
 			// specified file copy
-			if err := createFile(dstPath, header.Mode, tr); err != nil {
+			if err := createFile(dstPath, header, tr); err != nil {
 				return err
 			}
 			return nil
 		}
 		if header.FileInfo().IsDir() {
+			path := filepath.Join(dstPath, header.Name)
 			if err := os.MkdirAll(path, 0o755); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", path, err)
 			}
 		} else {
-			if err := createFile(path, header.Mode, tr); err != nil {
+			if err := createFile(dstPath, header, tr); err != nil {
 				return err
 			}
 		}
@@ -289,20 +322,28 @@ func extractArchivedFile(filePath string, dstPath string) error {
 	return nil
 }
 
-func createFile(path string, mode int64, tr *tar.Reader) error {
+func createFile(dstPath string, hdr *tar.Header, tr *tar.Reader) error {
+	path := filepath.Join(dstPath, hdr.Name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", filepath.Dir(path), err)
 	}
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("failed to create file %s: %w", path, err)
-	}
-	defer f.Close()
-	if err := f.Chmod(os.FileMode(mode)); err != nil {
-		return fmt.Errorf("failed to apply chmod %d", mode)
-	}
-	if _, err := io.Copy(f, tr); err != nil {
-		return fmt.Errorf("failed to copy from archived file to local file: %w", err)
+	if hdr.FileInfo().Mode()&os.ModeSymlink == os.ModeSymlink {
+		referFile := filepath.Join(dstPath, filepath.Dir(hdr.Name), hdr.Linkname)
+		if err := os.Symlink(referFile, path); err != nil {
+			return fmt.Errorf("failed to create symlink file %s: %s", path, err)
+		}
+	} else {
+		f, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("failed to create file %s: %w", path, err)
+		}
+		defer f.Close()
+		if err := f.Chmod(os.FileMode(hdr.Mode)); err != nil {
+			return fmt.Errorf("failed to apply chmod %d", hdr.Mode)
+		}
+		if _, err := io.Copy(f, tr); err != nil {
+			return fmt.Errorf("failed to copy from archived file to local file: %w", err)
+		}
 	}
 	return nil
 }
