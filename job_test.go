@@ -1178,7 +1178,7 @@ echo -n "hello" > /tmp/artifact.txt
 			}
 			if err := executors[0].CopyToPod(ctx,
 				file,
-				filepath.Join("/", "tmp", "artifact.txt"),
+				filepath.Join("/", "tmp"),
 			); err != nil {
 				return fmt.Errorf("failed to copy: %w", err)
 			}

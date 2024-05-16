@@ -303,18 +303,18 @@ func extractArchivedFile(filePath string, dstPath string) error {
 		}
 		if filepath.Join(baseDir, header.Name) == dstPath {
 			// specified file copy
-			if err := createFile(dstPath, header, tr); err != nil {
+			if err := createFile(dstPath, dstPath, header, tr); err != nil {
 				return err
 			}
 			return nil
 		}
+		path := filepath.Join(dstPath, header.Name)
 		if header.FileInfo().IsDir() {
-			path := filepath.Join(dstPath, header.Name)
 			if err := os.MkdirAll(path, 0o755); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", path, err)
 			}
 		} else {
-			if err := createFile(dstPath, header, tr); err != nil {
+			if err := createFile(dstPath, path, header, tr); err != nil {
 				return err
 			}
 		}
@@ -322,20 +322,19 @@ func extractArchivedFile(filePath string, dstPath string) error {
 	return nil
 }
 
-func createFile(dstPath string, hdr *tar.Header, tr *tar.Reader) error {
-	path := filepath.Join(dstPath, hdr.Name)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", filepath.Dir(path), err)
+func createFile(dstPath, outPath string, hdr *tar.Header, tr *tar.Reader) error {
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", filepath.Dir(outPath), err)
 	}
 	if hdr.FileInfo().Mode()&os.ModeSymlink == os.ModeSymlink {
 		referFile := filepath.Join(dstPath, filepath.Dir(hdr.Name), hdr.Linkname)
-		if err := os.Symlink(referFile, path); err != nil {
-			return fmt.Errorf("failed to create symlink file %s: %s", path, err)
+		if err := os.Symlink(referFile, outPath); err != nil {
+			return fmt.Errorf("failed to create symlink file to %s: %s", outPath, err)
 		}
 	} else {
-		f, err := os.Create(path)
+		f, err := os.Create(outPath)
 		if err != nil {
-			return fmt.Errorf("failed to create file %s: %w", path, err)
+			return fmt.Errorf("failed to create file %s: %w", outPath, err)
 		}
 		defer f.Close()
 		if err := f.Chmod(os.FileMode(hdr.Mode)); err != nil {
